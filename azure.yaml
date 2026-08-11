@@ -1,0 +1,79 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+name: copilot-presentation-agent
+requiredVersions:
+    extensions:
+        azure.ai.agents: ">=1.0.0-beta.9"
+        microsoft.foundry: ">=1.0.0-beta.2"
+metadata:
+    template: azure-samples/copilot-sdk-service
+services:
+    api:
+        project: ./src/api
+        host: containerapp
+        language: ts
+        docker:
+            path: ./Dockerfile
+        ports:
+            - "3000"
+    presentation-agent:
+        project: ./src/hosted-agent
+        host: azure.ai.agent
+        language: docker
+        docker:
+            path: ./Dockerfile
+            remoteBuild: true
+        uses:
+            - proj-default
+        container:
+            resources:
+                cpu: "1"
+                memory: 2Gi
+        kind: hosted
+        name: presentation-agent
+        displayName: Presentation Agent
+        description: Guides users through an approved technical story, architecture, and slide deck.
+        protocols:
+            - protocol: invocations
+              version: 2.0.0
+        environmentVariables:
+            - name: GITHUB_TOKEN_SECRET_URI
+              value: ${GITHUB_TOKEN_SECRET_URI}
+            - name: MODEL_NAME
+              value: gpt-5-mini
+        startupCommand: node dist/index.js
+    proj-default:
+        host: azure.ai.project
+        endpoint: https://foundry-haoling-eus2.services.ai.azure.com/api/projects/proj-default
+    web:
+        project: ./src/web
+        host: containerapp
+        language: ts
+        docker:
+            path: ./Dockerfile
+        ports:
+            - "80"
+hooks:
+    preprovision:
+        windows:
+            shell: pwsh
+            run: node scripts/get-github-token.mjs
+        posix:
+            shell: sh
+            run: node scripts/get-github-token.mjs
+    prerun:
+        windows:
+            shell: pwsh
+            run: node scripts/get-github-token.mjs
+        posix:
+            shell: sh
+            run: node scripts/get-github-token.mjs
+reqs:
+    - minVersion: 1.23.0
+      name: azd
+    - minVersion: 2.0.0
+      name: git
+    - name: docker
+    - name: pnpm
+    - name: node
+    - name: gh

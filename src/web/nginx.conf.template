@@ -1,0 +1,69 @@
+server {
+    listen 80;
+    client_max_body_size 500m;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Security headers
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    location /chat {
+        proxy_pass ${API_URL}/chat;
+        proxy_http_version 1.1;
+        proxy_set_header Host $proxy_host;
+        proxy_set_header Connection '';
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;
+        chunked_transfer_encoding on;
+    }
+
+    location /architecture {
+        proxy_pass ${API_URL}/architecture;
+        proxy_http_version 1.1;
+        proxy_set_header Host $proxy_host;
+        proxy_read_timeout 300s;
+    }
+
+    location /projects {
+        proxy_pass ${API_URL}/projects;
+        proxy_http_version 1.1;
+        proxy_set_header Host $proxy_host;
+        proxy_read_timeout 300s;
+    }
+
+    location /slides {
+        proxy_pass ${API_URL}/slides;
+        proxy_http_version 1.1;
+        proxy_set_header Host $proxy_host;
+        proxy_read_timeout 300s;
+    }
+
+    location /video {
+        proxy_pass ${API_URL}/video;
+        proxy_http_version 1.1;
+        proxy_set_header Host $proxy_host;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    location /config {
+        proxy_pass ${API_URL}/config;
+        proxy_http_version 1.1;
+        proxy_set_header Host $proxy_host;
+    }
+
+    location /health {
+        proxy_pass ${API_URL}/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host $proxy_host;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

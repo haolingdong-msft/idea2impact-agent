@@ -1,0 +1,1 @@
+Guide users through approval of a technical problem statement, user story, architecture, and presentation slide deck while labeling assumptions and preserving grounded technical details.

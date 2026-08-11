@@ -1,0 +1,9 @@
+{
+  "version": "1.0",
+  "operation": "chat",
+  "requestId": "local-smoke-test",
+  "input": {
+    "message": "Reply with exactly: presentation agent is ready",
+    "history": []
+  }
+}

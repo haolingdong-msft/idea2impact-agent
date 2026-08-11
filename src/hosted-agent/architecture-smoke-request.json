@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "operation": "architecture",
+  "requestId": "remote-architecture-smoke-test",
+  "input": {
+    "idea": "Build a presentation agent that creates technical architecture slides.",
+    "audience": "Software engineers",
+    "purpose": "Explain the hosted deployment",
+    "context": "Use a browser UI, an API gateway, a Foundry Hosted Agent, and durable asset storage."
+  }
+}
