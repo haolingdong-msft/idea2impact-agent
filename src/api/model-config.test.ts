@@ -63,25 +63,37 @@ describe("getSessionOptions", () => {
     vi.unstubAllEnvs();
   });
 
-  it("returns default options when no env vars set", async () => {
+  it("uses gpt-5.6-sol when no model env var is set", async () => {
     vi.stubEnv("MODEL_PROVIDER", "");
     vi.stubEnv("MODEL_NAME", "");
     const opts = await getSessionOptions();
-    expect(opts).toEqual({ streaming: false });
+    expect(opts).toEqual({
+      model: "gpt-5.6-sol",
+      streaming: false,
+      availableTools: [],
+    });
   });
 
   it("returns streaming option", async () => {
     vi.stubEnv("MODEL_PROVIDER", "");
     vi.stubEnv("MODEL_NAME", "");
     const opts = await getSessionOptions({ streaming: true });
-    expect(opts).toEqual({ streaming: true });
+    expect(opts).toEqual({
+      model: "gpt-5.6-sol",
+      streaming: true,
+      availableTools: [],
+    });
   });
 
   it("returns model when MODEL_NAME is set (GitHub specific)", async () => {
     vi.stubEnv("MODEL_PROVIDER", "");
     vi.stubEnv("MODEL_NAME", "o4-mini");
     const opts = await getSessionOptions();
-    expect(opts).toEqual({ model: "o4-mini", streaming: false });
+    expect(opts).toEqual({
+      model: "o4-mini",
+      streaming: false,
+      availableTools: [],
+    });
   });
 
   it("throws when MODEL_PROVIDER=azure without endpoint", async () => {
@@ -121,6 +133,7 @@ describe("getSessionOptions", () => {
     expect(opts).toMatchObject({
       model: "o4-mini",
       streaming: true,
+      availableTools: [],
       provider: {
         type: "azure",
         baseUrl: "https://my.openai.azure.com", // trailing slash stripped

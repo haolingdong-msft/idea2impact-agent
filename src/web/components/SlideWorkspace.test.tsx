@@ -36,6 +36,54 @@ const architecture: ArchitectureGraph = {
       provenance: 'confirmed',
     }],
   }],
+  platforms: [
+    {
+      id: 'web-platform',
+      label: 'Web Platform',
+      description: 'Hosts the workspace.',
+      technology: 'React',
+      componentNodeIds: ['workspace'],
+      provenance: 'confirmed',
+    },
+    {
+      id: 'copilot-platform',
+      label: 'GitHub Copilot',
+      description: 'Hosts generation.',
+      technology: 'GitHub Copilot SDK',
+      componentNodeIds: ['copilot'],
+      provenance: 'confirmed',
+    },
+  ],
+  workflow: {
+    actor: 'Presenter',
+    goal: 'Generate a slide deck',
+    steps: [
+      {
+        id: 'approve-story',
+        order: 1,
+        label: 'Approve story',
+        userAction: 'Review and approve the story.',
+        platformCalls: [{
+          nodeId: 'workspace',
+          action: 'capture approval',
+          mechanism: 'React UI',
+          output: 'approved story',
+        }],
+      },
+      {
+        id: 'generate-slides',
+        order: 2,
+        label: 'Generate slides',
+        userAction: 'Request the final deck.',
+        platformCalls: [{
+          nodeId: 'copilot',
+          action: 'generate deck',
+          mechanism: 'Copilot SDK',
+          output: 'slide deck',
+        }],
+      },
+    ],
+  },
   connections: [{
     from: 'workspace',
     to: 'copilot',
@@ -83,6 +131,7 @@ describe('SlideWorkspace', () => {
     render(
       <SlideWorkspace
         architecture={architecture}
+        visual={null}
         result={null}
         isGenerating={false}
         error={null}
@@ -90,7 +139,7 @@ describe('SlideWorkspace', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Generate HTML slides' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate slides + 5 designs' }))
     expect(onGenerate).toHaveBeenCalledOnce()
   })
 
@@ -98,6 +147,7 @@ describe('SlideWorkspace', () => {
     const { container } = render(
       <SlideWorkspace
         architecture={architecture}
+        visual={null}
         result={result}
         isGenerating={false}
         error={null}
@@ -116,5 +166,37 @@ describe('SlideWorkspace', () => {
       '/download',
     )
     expect(container.querySelector('svg')).not.toBeInTheDocument()
+  })
+
+  it('shows all five generated architecture choices for slides', () => {
+    const onArchitectureModeChange = vi.fn()
+    render(
+      <SlideWorkspace
+        architecture={architecture}
+        visual={{
+          mode: 'dual',
+          htmlUrl: '/architecture.html',
+          validatedJsonHtmlUrl: '/architecture-validated-json.html',
+          imageUrl: '/architecture.png',
+          narrativeImageUrl: '/architecture-narrative.png',
+          narrativeHtmlUrl: '/architecture-narrative.html',
+        }}
+        architectureMode="image"
+        onArchitectureModeChange={onArchitectureModeChange}
+        result={null}
+        isGenerating={false}
+        error={null}
+        onGenerate={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('All five were generated. The selected design is used by the deck.'))
+      .toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Agent narrative → HTML/CSS' }))
+    expect(onArchitectureModeChange).toHaveBeenCalledWith('narrative-html')
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Validated JSON → Copilot HTML/CSS',
+    }))
+    expect(onArchitectureModeChange).toHaveBeenCalledWith('validated-json-html')
   })
 })

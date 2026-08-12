@@ -72,4 +72,27 @@ describe('StoryApproval', () => {
     fireEvent.click(generateButton)
     expect(onGenerate).toHaveBeenCalledOnce()
   })
+
+  it('allows direct part updates after a deck exists', () => {
+    const onGenerate = vi.fn()
+    render(
+      <StoryApproval
+        approved={['problem', 'userStory', 'architecture']}
+        canApprove={false}
+        isGenerating={false}
+        isRefining
+        onApprove={vi.fn()}
+        onGenerate={onGenerate}
+      />,
+    )
+
+    expect(screen.getByText('Update any part in chat')).toBeInTheDocument()
+    expect(screen.queryByText('Confirm the story before drawing')).not.toBeInTheDocument()
+    const applyButton = screen.getByRole('button', {
+      name: 'Apply updates to slides',
+    })
+    expect(applyButton).toBeEnabled()
+    fireEvent.click(applyButton)
+    expect(onGenerate).toHaveBeenCalledOnce()
+  })
 })

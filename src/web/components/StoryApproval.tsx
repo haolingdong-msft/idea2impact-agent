@@ -10,6 +10,7 @@ interface Props {
   approved: StorySection[]
   canApprove: boolean
   isGenerating: boolean
+  isRefining?: boolean
   onApprove: (section: StorySection) => void
   onGenerate: () => void
 }
@@ -18,10 +19,44 @@ export function StoryApproval({
   approved,
   canApprove,
   isGenerating,
+  isRefining = false,
   onApprove,
   onGenerate,
 }: Props) {
   const allApproved = SECTIONS.every(section => approved.includes(section.id))
+
+  if (isRefining) {
+    return (
+      <section className="story-approval" aria-label="Presentation refinement">
+        <div className="approval-heading">
+          <div>
+            <span className="eyebrow">Deck ready</span>
+            <strong>Update any part in chat</strong>
+          </div>
+          <span>EDIT</span>
+        </div>
+        <div className="approval-list">
+          {SECTIONS.map(section => (
+            <div className="refinement-part" key={section.id}>
+              <span>OK</span>
+              <div>
+                <strong>{section.label}</strong>
+                <small>{section.detail}</small>
+              </div>
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          className="generate-button"
+          disabled={isGenerating}
+          onClick={onGenerate}
+        >
+          {isGenerating ? 'Applying updates...' : 'Apply updates to slides'}
+        </button>
+      </section>
+    )
+  }
 
   return (
     <section className="story-approval" aria-label="Story approval gates">

@@ -6,10 +6,12 @@ import {
   SLIDE_DECK_PROMPT,
 } from "../presentation-instructions.js";
 import type { ArchitectureGraph } from "./architecture.js";
+import type { ArchitectureVisualLayout } from "../architecture-visual.js";
 import {
   currentSourceAssetIds,
   getProject,
   isProjectId,
+  readProjectBinaryAsset,
   readProjectAsset,
   storeProjectJsonAsset,
   storeProjectTextAsset,
@@ -176,13 +178,62 @@ function renderArchitecture(architecture: ArchitectureGraph): string {
   return `<div class="architecture-composition">${layers}${flows}</div>`;
 }
 
+function renderArchitectureSvg(
+  architecture: ArchitectureGraph,
+  layout: ArchitectureVisualLayout,
+): string {
+  const nodes = new Map(
+    architecture.layers.flatMap(layer => layer.nodes.map(node => [node.id, node])),
+  );
+  const connections = new Map(
+    architecture.connections.map(connection => [
+      `${connection.from}->${connection.to}`,
+      connection,
+    ]),
+  );
+  const connectionSvg = layout.connections.map((position) => {
+    const connection = connections.get(`${position.from}->${position.to}`);
+    if (!connection) return "";
+    const points = position.points.map(point => `${point.x},${point.y}`).join(" ");
+    return `<g class="visual-connection visual-${escapeHtml(connection.type)}">
+      <polyline points="${points}" marker-end="url(#visual-arrow)"/>
+      <text x="${position.labelX}" y="${position.labelY}">${escapeHtml(connection.label)}</text>
+    </g>`;
+  }).join("");
+  const nodeSvg = layout.nodes.map((position) => {
+    const node = nodes.get(position.id);
+    if (!node) return "";
+    return `<g class="visual-node ${node.provenance === "assumed" ? "assumed" : ""}">
+      <rect x="${position.x}" y="${position.y}" width="${position.width}" height="${position.height}" rx="18"/>
+      <text class="visual-kind" x="${position.x + 20}" y="${position.y + 34}">${escapeHtml(node.kind)}</text>
+      <text class="visual-label" x="${position.x + 20}" y="${position.y + 69}">${escapeHtml(node.label)}</text>
+      <text class="visual-tech" x="${position.x + 20}" y="${position.y + position.height - 20}">${escapeHtml(node.technology)}</text>
+    </g>`;
+  }).join("");
+  return `<svg class="architecture-generated-svg" viewBox="0 0 1600 900" role="img" aria-label="${escapeHtml(architecture.title)}">
+    <defs><marker id="visual-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 Z"/></marker></defs>
+    ${connectionSvg}${nodeSvg}
+  </svg>`;
+}
+
 export function renderSlideDeckHtml(
   deck: SlideDeck,
   architecture: ArchitectureGraph,
+  visual?: {
+    layout?: ArchitectureVisualLayout;
+    imageDataUrl?: string;
+    htmlDocument?: string;
+  },
 ): string {
   const slides = deck.slides.map((slide, index) => {
     const content = slide.kind === "architecture"
-      ? renderArchitecture(architecture)
+      ? visual?.htmlDocument
+        ? `<iframe class="architecture-html-frame" sandbox="" srcdoc="${escapeHtml(visual.htmlDocument)}" title="${escapeHtml(architecture.title)} architecture diagram"></iframe>`
+        : visual?.layout
+        ? renderArchitectureSvg(architecture, visual.layout)
+        : visual?.imageDataUrl
+          ? `<div class="architecture-image"><img src="${escapeHtml(visual.imageDataUrl)}" alt="${escapeHtml(architecture.title)} architecture diagram"></div>`
+          : renderArchitecture(architecture)
       : `<ul>${slide.bullets.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
     return `<section class="slide slide-${escapeHtml(slide.kind)}">
       <div class="slide-number">${String(index + 1).padStart(2, "0")}</div>
@@ -215,6 +266,9 @@ export function renderSlideDeckHtml(
     .architecture header{font-weight:800;font-size:1rem}.architecture article>p{min-height:42px;color:var(--muted);font-size:.72rem;line-height:1.4}
     .architecture article>div{display:grid;gap:8px}.architecture span{padding:10px;background:rgba(12,20,34,.7);border-radius:9px}.architecture span.assumed,.architecture-flows span.assumed{border:1px dashed #dca85f}.architecture b,.architecture em,.architecture small{display:block}.architecture em{margin-top:4px;color:var(--blue);font:600 .55rem/1.2 ui-monospace,monospace;font-style:normal}.architecture small{margin-top:4px;color:var(--muted);font-size:.62rem;line-height:1.35}
     .architecture-flows{margin-top:10px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.architecture-flows span{padding:9px 11px;background:rgba(62,110,193,.17);border:1px solid rgba(121,167,255,.22);border-radius:9px}    .architecture-flows b,.architecture-flows em,.architecture-flows small{display:block}.architecture-flows b{font-size:.62rem}.architecture-flows em{margin-top:3px;color:var(--blue);font-size:.55rem;font-style:normal}.architecture-flows small{margin-top:3px;color:var(--muted);font-size:.54rem}
+    .architecture-image{margin-top:24px;display:grid;place-items:center}.architecture-image img{display:block;max-width:100%;max-height:58vh;object-fit:contain;border-radius:14px;box-shadow:0 18px 42px rgba(0,0,0,.28)}
+    .architecture-html-frame{display:block;width:100%;height:58vh;margin-top:20px;border:0;border-radius:14px;background:#fff}
+    .architecture-generated-svg{display:block;width:100%;max-height:58vh;margin-top:22px;background:#f7f9fc;border-radius:14px}.visual-node rect{fill:#fff;stroke:#b9c8dc;stroke-width:2}.visual-node.assumed rect{stroke-dasharray:8 6}.visual-kind{fill:#3976e8;font:700 17px ui-monospace,monospace;text-transform:uppercase}.visual-label{fill:#253149;font:700 27px Inter,Segoe UI,sans-serif}.visual-tech{fill:#687991;font:600 16px ui-monospace,monospace}.visual-connection{color:#3976e8}.visual-connection polyline{fill:none;stroke:currentColor;stroke-width:5;stroke-linecap:round;stroke-linejoin:round}.visual-connection text{fill:#425671;paint-order:stroke;stroke:#fff;stroke-width:9px;font:700 17px ui-monospace,monospace;text-anchor:middle}.visual-connection marker path{fill:context-stroke}
     @media(max-width:760px){.slide{padding:70px 24px}.slide-number{font-size:4rem}.architecture{grid-template-columns:1fr 1fr}.architecture-flows{grid-template-columns:1fr}ul{grid-template-columns:1fr}}
     @media print{body{background:#fff}.slide{width:13.333in;min-height:7.5in;page-break-after:always}}
   </style>
@@ -224,9 +278,25 @@ export function renderSlideDeckHtml(
 }
 
 router.post("/slides", async (req, res) => {
-  const { projectId } = req.body as { projectId?: unknown };
+  const { projectId, architectureVisualMode } = req.body as {
+    projectId?: unknown;
+    architectureVisualMode?: unknown;
+  };
   if (!isProjectId(projectId)) {
     res.status(400).json({ error: "A valid presentation project ID is required." });
+    return;
+  }
+  if (
+    architectureVisualMode !== undefined &&
+    architectureVisualMode !== "html" &&
+    architectureVisualMode !== "image" &&
+    architectureVisualMode !== "narrative-image" &&
+    architectureVisualMode !== "narrative-html" &&
+    architectureVisualMode !== "validated-json-html"
+  ) {
+    res.status(400).json({
+      error: "architectureVisualMode must name one of the five architecture visuals.",
+    });
     return;
   }
   const project = await getProject(projectId);
@@ -314,13 +384,73 @@ router.post("/slides", async (req, res) => {
       ]),
       { title: deck.title, slideCount: deck.slides.length },
     );
-    const html = renderSlideDeckHtml(deck, architecture);
+    const layoutAssetId = project.currentAssets["architecture-layout"];
+    const imageAssetId = project.currentAssets["architecture-image"];
+    const htmlAssetId = project.currentAssets["architecture-html"];
+    const validatedJsonHtmlAssetId =
+      project.currentAssets["architecture-validated-json-html"];
+    const narrativeImageAssetId = project.currentAssets["architecture-narrative-image"];
+    const narrativeHtmlAssetId = project.currentAssets["architecture-narrative-html"];
+    const [
+      layoutAsset,
+      imageAsset,
+      htmlArchitectureAsset,
+      validatedJsonHtmlAsset,
+      narrativeImageAsset,
+      narrativeHtmlAsset,
+    ] = await Promise.all([
+      layoutAssetId ? readProjectAsset(project.id, layoutAssetId) : null,
+      imageAssetId ? readProjectBinaryAsset(project.id, imageAssetId) : null,
+      htmlAssetId ? readProjectAsset(project.id, htmlAssetId) : null,
+      validatedJsonHtmlAssetId
+        ? readProjectAsset(project.id, validatedJsonHtmlAssetId)
+        : null,
+      narrativeImageAssetId
+        ? readProjectBinaryAsset(project.id, narrativeImageAssetId)
+        : null,
+      narrativeHtmlAssetId
+        ? readProjectAsset(project.id, narrativeHtmlAssetId)
+        : null,
+    ]);
+    const selectedVisualMode =
+      typeof architectureVisualMode === "string"
+        ? architectureVisualMode
+        : "image";
+    const visual = selectedVisualMode === "narrative-image" && narrativeImageAsset
+      ? { imageDataUrl: `data:image/png;base64,${Buffer.from(narrativeImageAsset.content).toString("base64")}` }
+      : selectedVisualMode === "narrative-html" && narrativeHtmlAsset
+        ? { htmlDocument: narrativeHtmlAsset.content }
+      : selectedVisualMode === "validated-json-html" && validatedJsonHtmlAsset
+        ? { htmlDocument: validatedJsonHtmlAsset.content }
+      : selectedVisualMode === "image" && imageAsset
+      ? { imageDataUrl: `data:image/png;base64,${Buffer.from(imageAsset.content).toString("base64")}` }
+      : selectedVisualMode === "html" && htmlArchitectureAsset
+        ? { htmlDocument: htmlArchitectureAsset.content }
+        : layoutAsset
+      ? { layout: JSON.parse(layoutAsset.content) as ArchitectureVisualLayout }
+      : imageAsset
+        ? { imageDataUrl: `data:image/png;base64,${Buffer.from(imageAsset.content).toString("base64")}` }
+        : htmlArchitectureAsset
+          ? { htmlDocument: htmlArchitectureAsset.content }
+        : undefined;
+    const html = renderSlideDeckHtml(deck, architecture, visual);
+    const slideSources = [
+      modelStored.asset.id,
+      storyAssetId,
+      architectureAssetId,
+      layoutAssetId,
+      imageAssetId,
+      htmlAssetId,
+      validatedJsonHtmlAssetId,
+      narrativeImageAssetId,
+      narrativeHtmlAssetId,
+    ].filter((id): id is string => Boolean(id));
     const htmlStored = await storeProjectTextAsset(
       project.id,
       "slide-deck",
       "html",
       html,
-      [modelStored.asset.id, storyAssetId, architectureAssetId],
+      slideSources,
       { title: deck.title, slideCount: deck.slides.length },
     );
     res.status(201).json({

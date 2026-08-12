@@ -366,6 +366,32 @@
   font-size: 0.62rem;
 }
 
+.brief-actions .secondary-button {
+  min-height: 38px;
+  padding: 0 16px;
+  border: 1px solid #b8c6da;
+  border-radius: 9px;
+  color: #263752;
+  background: #fff;
+  font: 700 0.7rem/1 Inter, sans-serif;
+  cursor: pointer;
+}
+
+.brief-actions .secondary-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.quick-status {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid #bdd0f4;
+  border-radius: 10px;
+  color: #315b9e;
+  background: #eef4ff;
+  font-size: 0.75rem;
+}
+
 .repository-status {
   margin: 0 16px 12px;
   padding: 10px 12px;
@@ -481,6 +507,206 @@
     radial-gradient(circle at 90% 4%, rgba(57, 118, 232, 0.08), transparent 28%),
     radial-gradient(circle at 5% 92%, rgba(31, 158, 151, 0.07), transparent 25%),
     rgba(255, 255, 255, 0.94);
+}
+
+.architecture-image-canvas {
+  min-width: 0;
+}
+
+.architecture-mode-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
+  gap: 4px;
+  margin-top: 16px;
+  padding: 4px;
+  border: 1px solid #dce3ed;
+  border-radius: 12px;
+  background: #f1f5fa;
+}
+
+.architecture-mode-switcher button {
+  padding: 9px 13px;
+  color: #596980;
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+  font-size: 0.66rem;
+  font-weight: 750;
+}
+
+.architecture-mode-switcher button.active {
+  color: #fff;
+  background: var(--ink);
+  box-shadow: 0 5px 14px rgba(21, 32, 53, 0.18);
+}
+
+.slide-visual-choice {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  margin: 18px 0;
+  padding: 14px 16px;
+  border: 1px solid #dce3ed;
+  border-radius: 14px;
+  background: #f8fafe;
+}
+
+.slide-visual-choice > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.slide-visual-choice strong {
+  color: var(--ink);
+  font-size: 0.75rem;
+}
+
+.slide-visual-choice small {
+  color: #718098;
+  font-size: 0.62rem;
+}
+
+.slide-visual-choice .architecture-mode-switcher {
+  margin-top: 0;
+}
+
+.architecture-image-canvas > img,
+.architecture-html-frame,
+.architecture-generated-svg {
+  display: block;
+  width: 100%;
+  margin-top: 20px;
+  border: 1px solid #dce3ed;
+  border-radius: 18px;
+  background: #f7f9fc;
+  box-shadow: 0 18px 46px rgba(30, 48, 76, 0.1);
+}
+
+.architecture-html-frame {
+  aspect-ratio: 16 / 9;
+  min-height: 560px;
+  border: 0;
+}
+
+.architecture-image-canvas > img {
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+}
+
+.raster-badge,
+.image-model-badge {
+  padding: 7px 10px;
+  border-radius: 999px;
+  color: #985b20;
+  background: #fff2dc;
+  font: 700 0.58rem/1 "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.generated-layer rect {
+  fill: rgba(239, 244, 251, 0.72);
+  stroke: #b9c8dc;
+  stroke-width: 2;
+}
+
+.generated-layer-label {
+  fill: #4f6380;
+  font: 700 22px/1 "IBM Plex Mono", monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.generated-node rect {
+  fill: #fff;
+  stroke: #cfd9e7;
+  stroke-width: 2;
+  filter: drop-shadow(0 9px 15px rgba(30, 48, 76, 0.12));
+}
+
+.generated-node.assumed rect {
+  stroke-dasharray: 8 6;
+}
+
+.generated-node-kind {
+  fill: #3976e8;
+  font: 700 17px/1 "IBM Plex Mono", monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.generated-node-label {
+  fill: #253149;
+  font: 700 27px/1 "IBM Plex Sans", sans-serif;
+}
+
+.generated-node-tech {
+  fill: #687991;
+  font: 600 16px/1 "IBM Plex Mono", monospace;
+}
+
+.generated-connection polyline {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.generated-connection.primary polyline {
+  stroke-width: 6;
+}
+
+.generated-connection text {
+  fill: #425671;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 9px;
+  stroke-linejoin: round;
+  font: 700 17px/1 "IBM Plex Mono", monospace;
+  text-anchor: middle;
+}
+
+.generated-connection marker path {
+  fill: context-stroke;
+}
+
+.slide-architecture-image {
+  position: relative;
+  margin-top: 14px;
+}
+
+.slide-architecture-image img {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  border-radius: 10px;
+}
+
+.slide-architecture-html-frame {
+  display: block;
+  width: 100%;
+  height: 360px;
+  border: 0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.slide-architecture-image span {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 5px 7px;
+  border-radius: 999px;
+  color: #d9e6fb;
+  background: rgba(12, 20, 34, 0.78);
+  font: 700 0.5rem/1 "IBM Plex Mono", monospace;
+  text-transform: uppercase;
 }
 
 .canvas-header {
@@ -713,6 +939,110 @@
   border-radius: 12px;
 }
 
+.workflow-map {
+  margin-top: 16px;
+  padding: 15px;
+  border: 1px solid #d8e3f3;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f7faff, #f2f8f7);
+}
+
+.workflow-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.workflow-platforms {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+.workflow-platforms > div {
+  display: grid;
+  gap: 2px;
+  padding: 8px 9px;
+  border: 1px solid #cfe0dc;
+  border-radius: 8px;
+  background: #f6fbfa;
+}
+
+.workflow-platforms strong {
+  color: #245c58;
+  font-size: 0.58rem;
+}
+
+.workflow-platforms small,
+.workflow-platforms span {
+  color: #708097;
+  font-size: 0.48rem;
+}
+
+.workflow-step {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 9px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #dce5f2;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.workflow-step > span {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--blue);
+  font: 750 0.62rem/1 "IBM Plex Mono", monospace;
+}
+
+.workflow-step h4 {
+  margin: 1px 0 3px;
+  color: var(--ink);
+  font-size: 0.68rem;
+}
+
+.workflow-step p {
+  margin: 0;
+  color: #69778d;
+  font-size: 0.55rem;
+  line-height: 1.35;
+}
+
+.workflow-platform-calls {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.workflow-platform-calls small {
+  display: grid;
+  gap: 2px;
+  padding: 6px 7px;
+  border-left: 3px solid var(--teal);
+  border-radius: 6px;
+  color: #6d7b8f;
+  background: #f5faf9;
+  font-size: 0.48rem;
+  line-height: 1.3;
+}
+
+.workflow-platform-calls b {
+  color: #255c59;
+}
+
+.workflow-platform-calls em {
+  color: #42526a;
+  font-style: normal;
+  font-weight: 700;
+}
+
 .flow-map-heading {
   display: flex;
   justify-content: space-between;
@@ -936,6 +1266,46 @@
 .approval-list button:disabled {
   cursor: not-allowed;
   opacity: 0.58;
+}
+
+.approval-list .refinement-part {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 25px 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  color: #637087;
+  background: #f1fbf9;
+  border: 1px solid rgba(31, 158, 151, 0.28);
+  border-radius: 8px;
+}
+
+.approval-list .refinement-part > span {
+  display: grid;
+  place-items: center;
+  width: 23px;
+  height: 23px;
+  color: #167c76;
+  border-radius: 6px;
+  background: #dff5f1;
+  font: 700 0.52rem/1 "IBM Plex Mono", monospace;
+}
+
+.approval-list .refinement-part > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.approval-list .refinement-part strong {
+  color: #344057;
+  font-size: 0.61rem;
+}
+
+.approval-list .refinement-part small {
+  color: #8993a5;
+  font-size: 0.52rem;
 }
 
 .generate-button {

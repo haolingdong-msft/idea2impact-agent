@@ -22,12 +22,12 @@ describe("GET /config", () => {
     vi.unstubAllEnvs();
   });
 
-  it("returns defaults when no env vars set", async () => {
+  it("returns the fixed GitHub model when no env vars are set", async () => {
     vi.stubEnv("MODEL_PROVIDER", "");
     vi.stubEnv("MODEL_NAME", "");
     const res = await request(createApp()).get("/config");
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ model: "(default)", provider: "github" });
+    expect(res.body).toEqual({ model: "gpt-5.6-sol", provider: "github" });
   });
 
   it("returns azure provider when MODEL_PROVIDER=azure", async () => {

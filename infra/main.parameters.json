@@ -6,6 +6,9 @@
     "useAzureModel": { "value": "${USE_AZURE_MODEL=false}" },
     "azureModelName": { "value": "${AZURE_MODEL_NAME=o4-mini}" },
     "azureModelVersion": { "value": "${AZURE_MODEL_VERSION=2025-04-16}" },
-    "presentationAgentInvocationsEndpoint": { "value": "${PRESENTATION_AGENT_INVOCATIONS_ENDPOINT=}" }
+    "presentationAgentInvocationsEndpoint": { "value": "${PRESENTATION_AGENT_INVOCATIONS_ENDPOINT=}" },
+    "architectureModelEndpoint": { "value": "${ARCHITECTURE_MODEL_ENDPOINT=}" },
+    "architectureImageDeployment": { "value": "${ARCHITECTURE_IMAGE_DEPLOYMENT=}" },
+    "architectureVisionDeployment": { "value": "${ARCHITECTURE_VISION_DEPLOYMENT=}" }
   }
 }

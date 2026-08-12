@@ -22,6 +22,12 @@ export type ProjectAssetType =
   | "repository-evidence"
   | "story"
   | "architecture"
+  | "architecture-html"
+  | "architecture-validated-json-html"
+  | "architecture-narrative-html"
+  | "architecture-image"
+  | "architecture-narrative-image"
+  | "architecture-layout"
   | "slide-model"
   | "slide-deck"
   | "source-video"
@@ -225,6 +231,19 @@ export async function readProjectAsset(
   const content = await readFile(
     join(projectDirectory(projectId), asset.relativePath),
     "utf8",
+  );
+  return { asset, content };
+}
+
+export async function readProjectBinaryAsset(
+  projectId: string,
+  assetId: string,
+): Promise<{ asset: ProjectAsset; content: Uint8Array } | null> {
+  const project = await getProject(projectId);
+  const asset = project?.assets.find(candidate => candidate.id === assetId);
+  if (!asset) return null;
+  const content = await readFile(
+    join(projectDirectory(projectId), asset.relativePath),
   );
   return { asset, content };
 }

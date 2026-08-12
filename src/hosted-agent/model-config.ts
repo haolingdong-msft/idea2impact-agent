@@ -10,6 +10,7 @@ let cachedToken: { token: string; expiresOn: number } | null = null;
 
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const SUPPORTED_MODEL_PREFIXES = ["o3", "o4-mini", "gpt-5", "codex-mini"];
+export const DEFAULT_COPILOT_MODEL = "gpt-5.6-sol";
 
 export function isModelSupported(modelName: string): boolean {
   const lower = modelName.toLowerCase();
@@ -64,12 +65,13 @@ export async function getSessionOptions(
   options?: { streaming?: boolean },
 ): Promise<Record<string, unknown>> {
   const provider = process.env.MODEL_PROVIDER;
-  const modelName = process.env.MODEL_NAME;
+  const configuredModelName = process.env.MODEL_NAME;
+  const modelName = configuredModelName || DEFAULT_COPILOT_MODEL;
   const streaming = options?.streaming ?? false;
 
   if (provider === "azure") {
     const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
-    if (!endpoint || !modelName) {
+    if (!endpoint || !configuredModelName) {
       throw new Error(
         "AZURE_OPENAI_ENDPOINT and MODEL_NAME are required for Azure BYOM.",
       );
@@ -82,6 +84,7 @@ export async function getSessionOptions(
     return {
       model: modelName,
       streaming,
+      availableTools: [],
       provider: {
         type: "azure",
         baseUrl: endpoint.replace(/\/$/, ""),
@@ -92,5 +95,5 @@ export async function getSessionOptions(
     };
   }
 
-  return modelName ? { model: modelName, streaming } : { streaming };
+  return { model: modelName, streaming, availableTools: [] };
 }

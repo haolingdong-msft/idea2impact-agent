@@ -36,6 +36,15 @@ param azureModelVersion string = '2025-04-16'
 @description('Foundry Hosted Agent invocations endpoint used by the application API')
 param presentationAgentInvocationsEndpoint string = ''
 
+@description('Azure OpenAI compatible endpoint containing the architecture image and vision deployments')
+param architectureModelEndpoint string = ''
+
+@description('Foundry image model deployment used to generate architecture diagrams')
+param architectureImageDeployment string = ''
+
+@description('Foundry multimodal deployment used to convert generated diagrams into editable layouts')
+param architectureVisionDeployment string = ''
+
 var tags = { 'azd-env-name': environmentName }
 var resourceSuffix = take(uniqueString(subscription().id, environmentName), 6)
 var shortName = take(replace(environmentName, '-', ''), 10)
@@ -60,6 +69,9 @@ module resources './resources.bicep' = {
     azureModelName: azureModelName
     azureModelVersion: azureModelVersion
     presentationAgentInvocationsEndpoint: presentationAgentInvocationsEndpoint
+    architectureModelEndpoint: architectureModelEndpoint
+    architectureImageDeployment: architectureImageDeployment
+    architectureVisionDeployment: architectureVisionDeployment
   }
 }
 

@@ -43,6 +43,17 @@ param azureModelVersion string = '2025-04-16'
 @description('Foundry Hosted Agent invocations endpoint used by the application API')
 param presentationAgentInvocationsEndpoint string = ''
 
+@description('Azure OpenAI compatible endpoint containing the architecture image and vision deployments')
+param architectureModelEndpoint string = ''
+
+@description('Foundry image model deployment used to generate architecture diagrams')
+param architectureImageDeployment string = ''
+
+@description('Foundry multimodal deployment used to convert generated diagrams into editable layouts')
+param architectureVisionDeployment string = ''
+
+var useArchitectureVisualModels = !empty(architectureModelEndpoint) && !empty(architectureImageDeployment) && !empty(architectureVisionDeployment)
+
 // ===================== //
 // AZD Pattern: Monitoring (Log Analytics + App Insights)
 // ===================== //
@@ -198,18 +209,25 @@ module containerAppApi 'br/public:avm/ptn/azd/acr-container-app:0.4.0' = {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
           value: monitoring.outputs.applicationInsightsConnectionString
         }
+        { name: 'AZURE_CLIENT_ID', value: managedIdentity.outputs.clientId }
       ],
       useAzureModel ? [
         { name: 'MODEL_PROVIDER', value: 'azure' }
         { name: 'MODEL_NAME', value: azureModelName }
         { name: 'AZURE_OPENAI_ENDPOINT', value: openai!.properties.endpoint }
-        { name: 'AZURE_CLIENT_ID', value: managedIdentity.outputs.clientId }
       ] : [],
       !empty(presentationAgentInvocationsEndpoint) ? [
         {
           name: 'PRESENTATION_AGENT_INVOCATIONS_ENDPOINT'
           value: presentationAgentInvocationsEndpoint
         }
+      ] : [],
+      useArchitectureVisualModels ? [
+        { name: 'ARCHITECTURE_MODEL_ENDPOINT', value: architectureModelEndpoint }
+        { name: 'ARCHITECTURE_IMAGE_DEPLOYMENT', value: architectureImageDeployment }
+        { name: 'ARCHITECTURE_VISION_DEPLOYMENT', value: architectureVisionDeployment }
+        { name: 'ARCHITECTURE_IMAGE_API_VERSION', value: '2025-04-01-preview' }
+        { name: 'ARCHITECTURE_VISION_API_VERSION', value: '2025-04-01-preview' }
       ] : []
     )
     secrets: [

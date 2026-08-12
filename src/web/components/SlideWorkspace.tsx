@@ -1,23 +1,76 @@
 import { useEffect, useState } from 'react'
 import type {
   ArchitectureGraph,
+  ArchitectureVisual,
+  ArchitectureVisualMode,
   Slide,
   SlideGenerationResult,
 } from '../types'
+import { ArchitectureModeSwitcher } from './ArchitectureModeSwitcher'
 
 interface Props {
   architecture: ArchitectureGraph
+  visual: ArchitectureVisual | null
   result: SlideGenerationResult | null
   isGenerating: boolean
   error: string | null
+  architectureMode?: ArchitectureVisualMode
+  onArchitectureModeChange?: (mode: ArchitectureVisualMode) => void
   onGenerate: () => void
 }
 
 function ArchitectureSlide({
   architecture,
+  visual,
+  architectureMode,
 }: {
   architecture: ArchitectureGraph
+  visual: ArchitectureVisual | null
+  architectureMode: ArchitectureVisualMode
 }) {
+  const activeVisualMode = visual?.mode === 'dual' ? architectureMode : visual?.mode
+  const activeHtmlUrl = activeVisualMode === 'narrative-html'
+    ? visual?.narrativeHtmlUrl
+    : activeVisualMode === 'validated-json-html'
+      ? visual?.validatedJsonHtmlUrl
+      : visual?.htmlUrl
+  if (
+    (
+      activeVisualMode === 'html' ||
+      activeVisualMode === 'narrative-html' ||
+      activeVisualMode === 'validated-json-html'
+    ) &&
+    activeHtmlUrl
+  ) {
+    return (
+      <div className="slide-architecture-image">
+        <iframe
+          className="slide-architecture-html-frame"
+          src={activeHtmlUrl}
+          title={`${architecture.title} architecture diagram`}
+          sandbox=""
+        />
+        <span>Copilot HTML + CSS</span>
+      </div>
+    )
+  }
+  const activeImageUrl = activeVisualMode === 'narrative-image'
+    ? visual?.narrativeImageUrl
+    : visual?.imageUrl
+  if (
+    (activeVisualMode === 'image' || activeVisualMode === 'narrative-image') &&
+    activeImageUrl
+  ) {
+    return (
+      <div className="slide-architecture-image">
+        <img
+          src={activeImageUrl}
+          alt={`${architecture.title} architecture design graph`}
+        />
+        <span>Foundry image model</span>
+      </div>
+    )
+  }
   const nodeNames = new Map(
     architecture.layers.flatMap(layer => layer.nodes.map(node => [node.id, node.label])),
   )
@@ -61,10 +114,14 @@ function ArchitectureSlide({
 function SlideContent({
   slide,
   architecture,
+  visual,
+  architectureMode,
   index,
 }: {
   slide: Slide
   architecture: ArchitectureGraph
+  visual: ArchitectureVisual | null
+  architectureMode: ArchitectureVisualMode
   index: number
 }) {
   return (
@@ -74,7 +131,11 @@ function SlideContent({
       <h3>{slide.title}</h3>
       {slide.subtitle && <p>{slide.subtitle}</p>}
       {slide.kind === 'architecture' ? (
-        <ArchitectureSlide architecture={architecture} />
+        <ArchitectureSlide
+          architecture={architecture}
+          visual={visual}
+          architectureMode={architectureMode}
+        />
       ) : (
         <ul>
           {slide.bullets.map((bullet, bulletIndex) => (
@@ -88,9 +149,12 @@ function SlideContent({
 
 export function SlideWorkspace({
   architecture,
+  visual,
   result,
   isGenerating,
   error,
+  architectureMode = 'image',
+  onArchitectureModeChange,
   onGenerate,
 }: Props) {
   const [activeSlide, setActiveSlide] = useState(0)
@@ -113,6 +177,19 @@ export function SlideWorkspace({
         {result && <span className="asset-badge">Stored with lineage</span>}
       </header>
 
+      {visual?.mode === 'dual' && (
+        <div className="slide-visual-choice">
+          <div>
+            <strong>Choose the architecture design for slides</strong>
+            <small>All five were generated. The selected design is used by the deck.</small>
+          </div>
+          <ArchitectureModeSwitcher
+            selectedMode={architectureMode}
+            onSelectedModeChange={onArchitectureModeChange}
+          />
+        </div>
+      )}
+
       {!result ? (
         <div className="slide-generation-empty">
           <div className="deck-skeleton" aria-hidden="true">
@@ -133,7 +210,7 @@ export function SlideWorkspace({
               disabled={isGenerating}
               onClick={onGenerate}
             >
-              {isGenerating ? 'Composing HTML slides...' : 'Generate HTML slides'}
+              {isGenerating ? 'Generating five designs and slides...' : 'Generate slides + 5 designs'}
             </button>
           </div>
         </div>
@@ -143,6 +220,8 @@ export function SlideWorkspace({
             <SlideContent
               slide={result.deck.slides[activeSlide]}
               architecture={architecture}
+              visual={visual}
+              architectureMode={architectureMode}
               index={activeSlide}
             />
           </div>

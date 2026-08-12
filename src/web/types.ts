@@ -45,6 +45,30 @@ export interface ArchitectureGraph {
   title: string
   summary: string
   layers: ArchitectureLayer[]
+  platforms: Array<{
+    id: string
+    label: string
+    description: string
+    technology: string
+    componentNodeIds: string[]
+    provenance: 'confirmed' | 'assumed'
+  }>
+  workflow: {
+    actor: string
+    goal: string
+    steps: Array<{
+      id: string
+      order: number
+      label: string
+      userAction: string
+      platformCalls: Array<{
+        nodeId: string
+        action: string
+        mechanism: string
+        output: string
+      }>
+    }>
+  }
   connections: Array<{
     from: string
     to: string
@@ -58,6 +82,43 @@ export interface ArchitectureGraph {
   }>
   assumptions: string[]
 }
+
+export interface ArchitectureVisualLayout {
+  width: 1600
+  height: 900
+  nodes: Array<{
+    id: string
+    x: number
+    y: number
+    width: number
+    height: number
+  }>
+  connections: Array<{
+    from: string
+    to: string
+    points: Array<{ x: number; y: number }>
+    labelX: number
+    labelY: number
+  }>
+}
+
+export interface ArchitectureVisual {
+  mode: 'dual' | 'html' | 'image' | 'legacy'
+  imageUrl?: string
+  narrativeImageUrl?: string
+  htmlUrl?: string
+  validatedJsonHtmlUrl?: string
+  narrativeHtmlUrl?: string
+  layout?: ArchitectureVisualLayout
+  fallbackReason?: string
+}
+
+export type ArchitectureVisualMode =
+  | 'html'
+  | 'image'
+  | 'narrative-image'
+  | 'narrative-html'
+  | 'validated-json-html'
 
 export type SlideKind =
   | 'title'

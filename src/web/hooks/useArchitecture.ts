@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react'
-import type { ArchitectureGraph, PresentationBrief } from '../types'
+import type { ArchitectureGraph, ArchitectureVisual, PresentationBrief } from '../types'
 
 export function useArchitecture() {
   const [architecture, setArchitecture] = useState<ArchitectureGraph | null>(null)
+  const [visual, setVisual] = useState<ArchitectureVisual | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -10,6 +11,7 @@ export function useArchitecture() {
     brief: PresentationBrief,
     context = '',
     projectId?: string,
+    generateVisuals = false,
   ) => {
     setIsGenerating(true)
     setError(null)
@@ -23,16 +25,34 @@ export function useArchitecture() {
           purpose: brief.purpose,
           context,
           projectId,
+          generateVisuals,
         }),
       })
-      const payload = await response.json() as {
+      const responseBody = await response.text()
+      if (!responseBody.trim()) {
+        throw new Error(
+          `Architecture service returned an empty response (${response.status}). ` +
+          'The generation connection may have timed out.',
+        )
+      }
+      let payload: {
         architecture?: ArchitectureGraph
+        visual?: ArchitectureVisual
         error?: string
+      }
+      try {
+        payload = JSON.parse(responseBody) as typeof payload
+      } catch {
+        throw new Error(
+          `Architecture service returned invalid JSON (${response.status}): ` +
+          responseBody.slice(0, 240),
+        )
       }
       if (!response.ok || !payload.architecture) {
         throw new Error(payload.error || `Architecture request failed (${response.status})`)
       }
       setArchitecture(payload.architecture)
+      setVisual(payload.visual || { mode: 'legacy' })
       return payload.architecture
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : 'Architecture generation failed'
@@ -43,5 +63,5 @@ export function useArchitecture() {
     }
   }, [])
 
-  return { architecture, isGenerating, error, generateArchitecture }
+  return { architecture, visual, isGenerating, error, generateArchitecture }
 }

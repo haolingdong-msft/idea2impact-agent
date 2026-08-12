@@ -5,6 +5,7 @@ import type { GitHubAuthStatus } from '../hooks/useGitHubAuth'
 interface Props {
   isLoading: boolean
   onSubmit: (brief: PresentationBrief) => void
+  onQuickGenerate?: (brief: PresentationBrief) => void
   githubStatus?: GitHubAuthStatus
   onGitHubLogout?: () => void
 }
@@ -20,6 +21,7 @@ const INITIAL_BRIEF: PresentationBrief = {
 export function IdeaBrief({
   isLoading,
   onSubmit,
+  onQuickGenerate,
   githubStatus,
   onGitHubLogout,
 }: Props) {
@@ -29,16 +31,18 @@ export function IdeaBrief({
     setBrief(current => ({ ...current, [field]: value }))
   }
 
+  const normalizedBrief = (): PresentationBrief => ({
+    title: brief.title.trim() || 'Untitled presentation',
+    idea: brief.idea.trim(),
+    audience: brief.audience.trim(),
+    purpose: brief.purpose.trim(),
+    repositoryUrl: brief.repositoryUrl?.trim() || undefined,
+  })
+
   const submit = (event: FormEvent) => {
     event.preventDefault()
     if (brief.idea.trim().length < 10) return
-    onSubmit({
-      title: brief.title.trim() || 'Untitled presentation',
-      idea: brief.idea.trim(),
-      audience: brief.audience.trim(),
-      purpose: brief.purpose.trim(),
-      repositoryUrl: brief.repositoryUrl?.trim() || undefined,
-    })
+    onSubmit(normalizedBrief())
   }
 
   return (
@@ -62,6 +66,7 @@ export function IdeaBrief({
           autoFocus
         />
       </label>
+
 
       <details className="brief-options">
         <summary>Optional details and codebase</summary>
@@ -133,6 +138,16 @@ export function IdeaBrief({
           {isLoading ? 'Starting conversation...' : 'Start story'}
           <span aria-hidden="true">-&gt;</span>
         </button>
+        {onQuickGenerate && (
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={isLoading || brief.idea.trim().length < 10}
+            onClick={() => onQuickGenerate(normalizedBrief())}
+          >
+            {isLoading ? 'Generating...' : 'Quick generate slides'}
+          </button>
+        )}
       </div>
     </form>
   )

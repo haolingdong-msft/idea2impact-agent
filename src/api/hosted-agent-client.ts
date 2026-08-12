@@ -41,7 +41,7 @@ async function authorizationHeader(endpoint: string): Promise<string | null> {
 }
 
 export async function invokeHostedAgent(
-  operation: "chat" | "architecture" | "slides",
+  operation: "chat" | "architecture" | "architecture-html" | "architecture-brief" | "slides",
   input: Record<string, unknown>,
   requestId = randomUUID(),
 ): Promise<Response> {
@@ -79,7 +79,7 @@ export async function invokeHostedAgent(
 }
 
 export async function invokeHostedStructured(
-  operation: "architecture" | "slides",
+  operation: "architecture" | "architecture-html" | "architecture-brief" | "slides",
   input: Record<string, unknown>,
 ): Promise<string> {
   const response = await invokeHostedAgent(operation, input);

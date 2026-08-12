@@ -33,6 +33,28 @@ describe("useService", () => {
     expect(result.current.isLoading).toBe(false);
   });
 
+  it("resets conversation state for a new presentation project", async () => {
+    const stream = createSSEStream([
+      'data: {"content":"Old project response"}\n\n',
+      "data: [DONE]\n\n",
+    ]);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    );
+    const { result } = renderHook(() => useService());
+    await act(async () => {
+      await result.current.sendMessage("Old project");
+    });
+
+    act(() => result.current.resetConversation());
+
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.isLoading).toBe(false);
+  });
+
   it("adds user and assistant messages on send", async () => {
     const stream = createSSEStream([
       'data: {"content":"Hello"}\n\n',
@@ -188,6 +210,32 @@ describe("useService", () => {
       "/chat",
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it("marks post-generation chat as refinement", async () => {
+    const stream = createSSEStream(["data: [DONE]\n\n"]);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    );
+    const { result } = renderHook(() => useService());
+
+    await act(async () => {
+      await result.current.sendMessage(
+        "Highlight the Foundry Agent.",
+        undefined,
+        "project-1",
+        "refinement",
+      );
+    });
+
+    const request = fetchSpy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      projectId: "project-1",
+      workflowMode: "refinement",
+    });
   });
 
   it("handles SSE error events from server", async () => {

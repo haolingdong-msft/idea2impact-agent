@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  clearCurrentProjectAssets,
   createProject,
   currentSourceAssetIds,
   getProject,
@@ -108,7 +109,18 @@ router.put("/projects/:projectId/story", async (req, res) => {
     currentSourceAssetIds(project, ["brief", "repository-evidence"]),
     { approvedSectionCount: approvedSections.length },
   );
-  res.json({ project: stored.project, asset: stored.asset });
+  const updatedProject = await clearCurrentProjectAssets(project.id, [
+    "architecture",
+    "architecture-html",
+    "architecture-validated-json-html",
+    "architecture-narrative-html",
+    "architecture-image",
+    "architecture-narrative-image",
+    "architecture-layout",
+    "slide-model",
+    "slide-deck",
+  ]);
+  res.json({ project: updatedProject, asset: stored.asset });
 });
 
 export default router;

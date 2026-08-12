@@ -44,4 +44,31 @@ describe('IdeaBrief', () => {
       'https://github.com/example/repository',
     )
   })
+
+  it('supports one-click slide generation from idea and codebase', async () => {
+    const user = userEvent.setup()
+    const onQuickGenerate = vi.fn()
+    render(
+      <IdeaBrief
+        isLoading={false}
+        onSubmit={vi.fn()}
+        onQuickGenerate={onQuickGenerate}
+      />,
+    )
+    await user.type(
+      screen.getByLabelText('Idea'),
+      'Generate slides directly from this product and its codebase.',
+    )
+    await user.click(screen.getByText('Optional details and codebase'))
+    await user.type(
+      screen.getByLabelText('GitHub repository URL (optional)'),
+      'https://github.com/example/repository',
+    )
+    await user.click(screen.getByRole('button', { name: /quick generate slides/i }))
+
+    expect(onQuickGenerate).toHaveBeenCalledWith(expect.objectContaining({
+      idea: 'Generate slides directly from this product and its codebase.',
+      repositoryUrl: 'https://github.com/example/repository',
+    }))
+  })
 })

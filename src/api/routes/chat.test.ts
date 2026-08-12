@@ -186,6 +186,49 @@ describe("POST /chat", () => {
       expect(res.status).toBe(200);
       expect(res.text).toContain("data: [DONE]");
     });
+
+    it("routes post-generation changes directly to the requested part", async () => {
+      const session = createMockSession({ deltas: ["Revised architecture"] });
+      (getClient as Mock).mockResolvedValue({
+        createSession: vi.fn().mockResolvedValue(session),
+      });
+
+      await request(createApp())
+        .post("/chat")
+        .send({
+          message: "Highlight the Foundry Agent in the architecture.",
+          workflowMode: "refinement",
+        })
+        .buffer(true);
+
+      const prompt = session.send.mock.calls[0][0].prompt;
+      expect(prompt).toContain("POST-GENERATION REFINEMENT MODE");
+      expect(prompt).toContain("do not ask for approval");
+      expect(prompt).toContain("requested Problem Statement, User Story, or Architecture part");
+    });
+
+    it("configures the fixed three-section presentation workflow", async () => {
+      const session = createMockSession({ deltas: ["Problem statement"] });
+      const createSession = vi.fn().mockResolvedValue(session);
+      (getClient as Mock).mockResolvedValue({ createSession });
+
+      await request(createApp())
+        .post("/chat")
+        .send({ message: "Build a presentation from my repository." })
+        .buffer(true);
+
+      const instructions = createSession.mock.calls[0][0].systemMessage.content;
+      expect(instructions).toContain(
+        "Problem Statement -> User Story -> Architecture",
+      );
+      expect(instructions).toContain(
+        "Never ask what the user wants done with the repository",
+      );
+      expect(instructions).toContain("Never offer to run tests");
+      expect(session.send).toHaveBeenCalledWith({
+        prompt: expect.stringContaining("NO REPOSITORY EVIDENCE WAS PROVIDED"),
+      });
+    });
   });
 
   describe("error handling", () => {

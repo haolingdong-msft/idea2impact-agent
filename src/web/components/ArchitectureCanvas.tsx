@@ -1,10 +1,19 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import type { ArchitectureGraph, ArchitectureNodeKind } from '../types'
+import type {
+  ArchitectureGraph,
+  ArchitectureNodeKind,
+  ArchitectureVisual,
+  ArchitectureVisualMode,
+} from '../types'
+import { ArchitectureModeSwitcher } from './ArchitectureModeSwitcher'
 
 interface Props {
   architecture: ArchitectureGraph | null
+  visual: ArchitectureVisual | null
   isLoading: boolean
   error: string | null
+  selectedMode?: ArchitectureVisualMode
+  onSelectedModeChange?: (mode: ArchitectureVisualMode) => void
 }
 
 const KIND_LABELS: Record<ArchitectureNodeKind, string> = {
@@ -23,7 +32,14 @@ type Connector = ArchitectureGraph['connections'][number] & {
   labelY: number
 }
 
-export function ArchitectureCanvas({ architecture, isLoading, error }: Props) {
+export function ArchitectureCanvas({
+  architecture,
+  visual,
+  isLoading,
+  error,
+  selectedMode = 'image',
+  onSelectedModeChange,
+}: Props) {
   const diagramRef = useRef<HTMLDivElement>(null)
   const [connectors, setConnectors] = useState<Connector[]>([])
 
@@ -109,8 +125,90 @@ export function ArchitectureCanvas({ architecture, isLoading, error }: Props) {
     )
   }
 
+  const activeVisualMode = visual?.mode === 'dual' ? selectedMode : visual?.mode
+  const visualSwitcher = visual?.mode === 'dual' ? (
+    <ArchitectureModeSwitcher
+      selectedMode={selectedMode}
+      onSelectedModeChange={onSelectedModeChange}
+    />
+  ) : null
+
+  const activeHtmlUrl = activeVisualMode === 'narrative-html'
+    ? visual?.narrativeHtmlUrl
+    : activeVisualMode === 'validated-json-html'
+      ? visual?.validatedJsonHtmlUrl
+      : visual?.htmlUrl
+  if (
+    (
+      activeVisualMode === 'html' ||
+      activeVisualMode === 'narrative-html' ||
+      activeVisualMode === 'validated-json-html'
+    ) &&
+    activeHtmlUrl
+  ) {
+    return (
+      <section className="architecture-canvas architecture-image-canvas">
+        <header className="canvas-header">
+          <div>
+            <span className="eyebrow">
+              {activeVisualMode === 'narrative-html'
+                ? 'Agent narrative → Copilot HTML + CSS'
+                : activeVisualMode === 'validated-json-html'
+                  ? 'Validated JSON → Copilot HTML + CSS'
+                : 'Full-context Copilot HTML + CSS'}
+            </span>
+            <h2>{architecture.title}</h2>
+            <p>{architecture.summary}</p>
+          </div>
+          <span className="image-model-badge">Creative / non-deterministic</span>
+        </header>
+        {visualSwitcher}
+        <iframe
+          className="architecture-html-frame"
+          src={activeHtmlUrl}
+          title={`${architecture.title} architecture diagram`}
+          sandbox=""
+        />
+      </section>
+    )
+  }
+
+  const activeImageUrl = activeVisualMode === 'narrative-image'
+    ? visual?.narrativeImageUrl
+    : visual?.imageUrl
+  if (
+    (activeVisualMode === 'image' || activeVisualMode === 'narrative-image') &&
+    activeImageUrl
+  ) {
+    return (
+      <section className="architecture-canvas architecture-image-canvas">
+        <header className="canvas-header">
+          <div>
+            <span className="eyebrow">
+              {activeVisualMode === 'narrative-image'
+                ? 'Agent narrative → Foundry image generation'
+                : 'Validated JSON → Foundry image generation'}
+            </span>
+            <h2>{architecture.title}</h2>
+            <p>{architecture.summary}</p>
+          </div>
+          <span className="image-model-badge">Designed image graph</span>
+        </header>
+        {visualSwitcher}
+        <img
+          src={activeImageUrl}
+          alt={`${architecture.title} architecture design graph`}
+        />
+      </section>
+    )
+  }
+
   const nodeNames = new Map(
     architecture.layers.flatMap(layer => layer.nodes.map(node => [node.id, node.label])),
+  )
+  const nodePlatforms = new Map(
+    architecture.platforms.flatMap(platform =>
+      platform.componentNodeIds.map(nodeId => [nodeId, platform.label] as const)),
   )
 
   return (
@@ -224,6 +322,49 @@ export function ArchitectureCanvas({ architecture, isLoading, error }: Props) {
                     </div>
                   </div>
                 ))}
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+
+      <div className="workflow-map">
+        <div className="flow-map-heading">
+          <span className="eyebrow">User workflow · {architecture.workflow.actor}</span>
+          <strong>{architecture.workflow.goal}</strong>
+        </div>
+        <div className="workflow-platforms">
+          {architecture.platforms.map(platform => (
+            <div key={platform.id}>
+              <strong>{platform.label}</strong>
+              <small>{platform.technology}</small>
+              <span>
+                {platform.componentNodeIds
+                  .map(nodeId => nodeNames.get(nodeId) || nodeId)
+                  .join(' · ')}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="workflow-steps">
+          {architecture.workflow.steps.map(step => (
+            <article className="workflow-step" key={step.id}>
+              <span>{step.order}</span>
+              <div>
+                <h4>{step.label}</h4>
+                <p>{step.userAction}</p>
+                <div className="workflow-platform-calls">
+                  {step.platformCalls.map((call, callIndex) => (
+                    <small key={`${step.id}-${call.nodeId}-${callIndex}`}>
+                      <b>
+                        {nodePlatforms.get(call.nodeId) || 'Platform'} →{' '}
+                        {nodeNames.get(call.nodeId) || call.nodeId}
+                      </b>
+                      <em>{call.action}</em>
+                      <span>{call.mechanism} → {call.output}</span>
+                    </small>
+                  ))}
+                </div>
               </div>
             </article>
           ))}

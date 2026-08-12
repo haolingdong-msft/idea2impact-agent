@@ -7,10 +7,19 @@ export function useService() {
   const messagesRef = useRef<Message[]>([])
   const abortRef = useRef<AbortController | null>(null)
 
+  const resetConversation = useCallback(() => {
+    abortRef.current?.abort()
+    abortRef.current = null
+    messagesRef.current = []
+    setMessages([])
+    setIsLoading(false)
+  }, [])
+
   const sendMessage = useCallback(async (
     text: string,
     brief?: PresentationBrief,
     projectId?: string,
+    workflowMode: 'initial' | 'refinement' = 'initial',
   ) => {
     // Abort any in-flight request
     abortRef.current?.abort()
@@ -48,6 +57,7 @@ export function useService() {
             : text,
           history: history.length > 0 ? history : undefined,
           projectId,
+          workflowMode,
         }),
         signal: controller.signal,
       })
@@ -118,5 +128,5 @@ export function useService() {
     }
   }, [])
 
-  return { messages, isLoading, sendMessage }
+  return { messages, isLoading, sendMessage, resetConversation }
 }

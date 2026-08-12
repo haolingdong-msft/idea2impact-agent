@@ -19,11 +19,11 @@ import {
   nextStorySection,
   storyApprovalsFromMessages,
 } from './story-approval'
-import type { PresentationBrief, StorySection } from './types'
+import type { ArchitectureVisualMode, PresentationBrief, StorySection } from './types'
 
 export default function App() {
-  const { messages, isLoading, sendMessage } = useService()
-  const { architecture, isGenerating, error, generateArchitecture } = useArchitecture()
+  const { messages, isLoading, sendMessage, resetConversation } = useService()
+  const { architecture, visual, isGenerating, error, generateArchitecture } = useArchitecture()
   const {
     project,
     isSaving,
@@ -41,6 +41,9 @@ export default function App() {
   const [brief, setBrief] = useState<PresentationBrief | null>(null)
   const [approvedSections, setApprovedSections] = useState<StorySection[]>([])
   const [lastApprovalAssistantCount, setLastApprovalAssistantCount] = useState(0)
+  const [quickStatus, setQuickStatus] = useState<string | null>(null)
+  const [quickError, setQuickError] = useState<string | null>(null)
+  const [architectureView, setArchitectureView] = useState<ArchitectureVisualMode>('image')
   const {
     evidence: repositoryEvidence,
     isScanning,
@@ -54,6 +57,7 @@ export default function App() {
 
   const startProject = async (nextBrief: PresentationBrief) => {
     try {
+      resetConversation()
       const createdProject = await createPresentationProject(nextBrief)
       setBrief(nextBrief)
       setApprovedSections([])
@@ -68,6 +72,44 @@ export default function App() {
       await sendMessage(nextBrief.idea, nextBrief, createdProject.id)
     } catch {
       // The project hook exposes the actionable error beside the brief.
+    }
+  }
+
+  const quickGeneratePresentation = async (nextBrief: PresentationBrief) => {
+    setQuickError(null)
+    try {
+      resetConversation()
+      clearSlides()
+      setQuickStatus('Creating presentation project...')
+      const createdProject = await createPresentationProject(nextBrief)
+      setBrief(nextBrief)
+      setApprovedSections(['problem', 'userStory', 'architecture'])
+      if (nextBrief.repositoryUrl) {
+        setQuickStatus('Scanning codebase for architecture evidence...')
+        await scanRepository(createdProject.id, nextBrief.repositoryUrl)
+      }
+      const directContext = [
+        'Quick generation mode: derive the Problem Statement, User Story, and high-level Architecture directly from the supplied idea and optional codebase evidence.',
+        `Idea: ${nextBrief.idea}`,
+        `Audience: ${nextBrief.audience || 'Not specified'}`,
+        `Purpose: ${nextBrief.purpose || 'Not specified'}`,
+      ].join('\n')
+      setQuickStatus('Preparing grounded presentation story...')
+      await saveApprovedStory(
+        createdProject.id,
+        directContext,
+        ['problem', 'userStory', 'architecture'],
+      )
+      setQuickStatus('Generating HTML/CSS and image-model architecture designs...')
+      await generateArchitecture(nextBrief, directContext, createdProject.id, true)
+      setQuickStatus('Composing slide deck...')
+      await generateSlides(createdProject.id, architectureView)
+      setQuickStatus(null)
+    } catch (caught) {
+      setQuickStatus(null)
+      setQuickError(
+        caught instanceof Error ? caught.message : 'Quick slide generation failed.',
+      )
     }
   }
 
@@ -94,16 +136,21 @@ export default function App() {
     try {
       clearSlides()
       await saveApprovedStory(project.id, context, approvedSections)
-      await generateArchitecture(brief, context, project.id)
+      await generateArchitecture(brief, context, project.id, false)
     } catch {
       // Storage and generation hooks expose errors in the workspace.
     }
   }
 
   const generateApprovedSlides = async () => {
-    if (!project) return
+    if (!brief || !project) return
+    const context = messages
+      .filter(message => message.role !== 'error' && message.content.trim())
+      .map(message => `${message.role.toUpperCase()}: ${message.content}`)
+      .join('\n\n')
     try {
-      await generateSlides(project.id)
+      await generateArchitecture(brief, context, project.id, true)
+      await generateSlides(project.id, architectureView)
     } catch {
       // The slide hook exposes the actionable error in the slide workspace.
     }
@@ -118,8 +165,8 @@ export default function App() {
     try {
       clearSlides()
       await saveApprovedStory(project.id, context, approvedSections)
-      await generateArchitecture(brief, context, project.id)
-      await generateSlides(project.id)
+      await generateArchitecture(brief, context, project.id, true)
+      await generateSlides(project.id, architectureView)
     } catch {
       // The project, architecture, and slide hooks expose actionable errors.
     }
@@ -146,6 +193,10 @@ export default function App() {
   }, [messages])
 
   const sendStoryMessage = async (message: string) => {
+    if (slideResult) {
+      await sendMessage(message, undefined, project?.id, 'refinement')
+      return
+    }
     const nextSection = nextStorySection(approvedSections)
     if (
       nextSection &&
@@ -193,6 +244,8 @@ export default function App() {
             )}
           </div>
         </header>
+        {quickStatus && <p className="quick-status" role="status">{quickStatus}</p>}
+        {quickError && <p className="project-error" role="alert">{quickError}</p>}
 
         {!brief ? (
           <>
@@ -201,12 +254,13 @@ export default function App() {
                 <IdeaBrief
                   isLoading={isGenerating || isLoading || isSaving || isScanning}
                   onSubmit={briefValue => void startProject(briefValue)}
+                  onQuickGenerate={briefValue => void quickGeneratePresentation(briefValue)}
                   githubStatus={githubStatus}
                   onGitHubLogout={() => void logoutGitHub()}
                 />
                 {projectError && <p className="project-error" role="alert">{projectError}</p>}
               </div>
-              <ArchitectureCanvas architecture={null} isLoading={false} error={null} />
+              <ArchitectureCanvas architecture={null} visual={null} isLoading={false} error={null} />
             </div>
             <VideoWorkspace standalone />
           </>
@@ -216,8 +270,11 @@ export default function App() {
               <div className="canvas-panel">
                 <ArchitectureCanvas
                   architecture={architecture}
+                  visual={visual}
                   isLoading={isGenerating}
                   error={error}
+                  selectedMode={architectureView}
+                  onSelectedModeChange={setArchitectureView}
                 />
               </div>
               <aside className="copilot-panel">
@@ -232,6 +289,7 @@ export default function App() {
                   approved={approvedSections}
                   canApprove={approvalReady}
                   isGenerating={isGenerating || isGeneratingSlides}
+                  isRefining={Boolean(slideResult)}
                   onApprove={section => void approveSection(section)}
                   onGenerate={() => void generateApprovedPresentation()}
                 />
@@ -257,9 +315,12 @@ export default function App() {
             {architecture && (
               <SlideWorkspace
                 architecture={architecture}
+                visual={visual}
                 result={slideResult}
-                isGenerating={isGeneratingSlides}
+                isGenerating={isGenerating || isGeneratingSlides}
                 error={slideError}
+                architectureMode={architectureView}
+                onArchitectureModeChange={setArchitectureView}
                 onGenerate={() => void generateApprovedSlides()}
               />
             )}

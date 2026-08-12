@@ -171,7 +171,9 @@ cd src/api && pnpm dev
 
 **2. GitHub Specific Model**
 
-Set `MODEL_NAME` to choose a specific GitHub-hosted model:
+The presentation agent defaults to `gpt-5.6-sol` for Copilot SDK code, JSON,
+and HTML/CSS generation. Set `MODEL_NAME` to override it with another
+GitHub-hosted model:
 
 ```bash
 # Option A: azd app run

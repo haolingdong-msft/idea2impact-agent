@@ -63,6 +63,54 @@ const GRAPH: ArchitectureGraph = {
       ],
     },
   ],
+  platforms: [
+    {
+      id: "web-platform",
+      label: "Web Platform",
+      description: "Hosts the user workspace.",
+      technology: "React",
+      componentNodeIds: ["workspace"],
+      provenance: "confirmed",
+    },
+    {
+      id: "copilot-platform",
+      label: "GitHub Copilot",
+      description: "Hosts presentation generation.",
+      technology: "GitHub Copilot SDK",
+      componentNodeIds: ["copilot"],
+      provenance: "confirmed",
+    },
+  ],
+  workflow: {
+    actor: "Presenter",
+    goal: "Generate a presentation",
+    steps: [
+      {
+        id: "review-story",
+        order: 1,
+        label: "Review story",
+        userAction: "Review the presentation story.",
+        platformCalls: [{
+          nodeId: "workspace",
+          action: "present story",
+          mechanism: "React UI",
+          output: "approved story",
+        }],
+      },
+      {
+        id: "generate-deck",
+        order: 2,
+        label: "Generate deck",
+        userAction: "Request presentation generation.",
+        platformCalls: [{
+          nodeId: "copilot",
+          action: "generate presentation",
+          mechanism: "Copilot SDK",
+          output: "slide deck",
+        }],
+      },
+    ],
+  },
   connections: [{
     from: "workspace",
     to: "copilot",
@@ -153,6 +201,33 @@ describe("slide generation", () => {
     expect(html).toContain("GitHub Copilot SDK");
     expect(html).toContain("HTTPS JSON");
     expect(html).toContain("approved story context");
+  });
+
+  it("renders editable SVG or a self-contained pixel fallback", () => {
+    const layout = {
+      width: 1600 as const,
+      height: 900 as const,
+      nodes: [
+        { id: "workspace", x: 100, y: 200, width: 300, height: 150 },
+        { id: "copilot", x: 800, y: 200, width: 300, height: 150 },
+      ],
+      connections: [{
+        from: "workspace",
+        to: "copilot",
+        points: [{ x: 400, y: 275 }, { x: 800, y: 275 }],
+        labelX: 600,
+        labelY: 250,
+      }],
+    };
+    const editable = renderSlideDeckHtml(DECK, GRAPH, { layout });
+    expect(editable).toContain("architecture-generated-svg");
+    expect(editable).toContain("generate architecture");
+
+    const raster = renderSlideDeckHtml(DECK, GRAPH, {
+      imageDataUrl: "data:image/png;base64,cG5n",
+    });
+    expect(raster).toContain("data:image/png;base64,cG5n");
+    expect(raster).toContain("architecture-image");
   });
 
   it("generates and stores HTML slides with asset lineage", async () => {

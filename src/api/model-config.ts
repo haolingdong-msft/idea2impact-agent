@@ -3,6 +3,7 @@ let cachedCredential: { getToken(scope: string): Promise<{ token: string; expire
 let cachedToken: { token: string; expiresOn: number } | null = null;
 
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+export const DEFAULT_COPILOT_MODEL = "gpt-5.6-sol";
 
 /**
  * Models known to support the Copilot SDK's encrypted content format.
@@ -74,13 +75,14 @@ async function getAzureBearerToken(): Promise<string> {
  */
 export async function getSessionOptions(opts?: { streaming?: boolean }): Promise<Record<string, unknown>> {
   const provider = process.env.MODEL_PROVIDER;
-  const modelName = process.env.MODEL_NAME;
+  const configuredModelName = process.env.MODEL_NAME;
+  const modelName = configuredModelName || DEFAULT_COPILOT_MODEL;
   const streaming = opts?.streaming ?? false;
 
   // Path 3: Azure BYOM — use SDK with type "azure" + bearerToken for RBAC auth
   if (provider === "azure") {
     const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
-    if (!endpoint || !modelName) {
+    if (!endpoint || !configuredModelName) {
       throw new Error("AZURE_OPENAI_ENDPOINT and MODEL_NAME are required when MODEL_PROVIDER is 'azure'");
     }
     if (!isModelSupported(modelName)) {
@@ -93,6 +95,7 @@ export async function getSessionOptions(opts?: { streaming?: boolean }): Promise
     return {
       model: modelName,
       streaming,
+      availableTools: [],
       provider: {
         type: "azure",
         baseUrl: endpoint.replace(/\/$/, ""),
@@ -103,11 +106,6 @@ export async function getSessionOptions(opts?: { streaming?: boolean }): Promise
     };
   }
 
-  // Path 1: GitHub default — no model, no provider
-  if (!modelName) {
-    return { streaming };
-  }
-
-  // Path 2: GitHub specific — model only, no provider
-  return { model: modelName, streaming };
+  // GitHub-hosted Copilot model, fixed by default for reproducible generation.
+  return { model: modelName, streaming, availableTools: [] };
 }
