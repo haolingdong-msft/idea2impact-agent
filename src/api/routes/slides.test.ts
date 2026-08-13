@@ -13,12 +13,20 @@ vi.mock("../model-config.js", () => ({
     error instanceof Error ? error : new Error(String(error))),
 }));
 
+vi.mock("./pptx-export.js", () => ({
+  exportHtmlToEditablePptx: vi.fn().mockResolvedValue(
+    Buffer.from("PK editable pptx"),
+  ),
+}));
+
 import { getClient } from "../client.js";
+import { exportHtmlToEditablePptx } from "./pptx-export.js";
 import type { ArchitectureGraph } from "./architecture.js";
 import {
   createProject,
   projectDirectory,
   storeProjectJsonAsset,
+  storeProjectTextAsset,
 } from "./project-store.js";
 import slideRoutes, {
   renderSlideDeckHtml,
@@ -147,11 +155,19 @@ const DECK: SlideDeck = {
     },
     {
       id: "journey",
-      kind: "user-story",
-      eyebrow: "User story",
+      kind: "user-scenarios",
+      eyebrow: "User scenarios",
       title: "One guided project",
       subtitle: "",
       bullets: ["A presenter moves from idea to slides without re-entering context."],
+    },
+    {
+      id: "solution",
+      kind: "solution",
+      eyebrow: "Solution",
+      title: "A synchronized presentation workflow",
+      subtitle: "",
+      bullets: ["One approved outline grounds architecture, slides, and speaker notes."],
     },
     {
       id: "system",
@@ -183,12 +199,12 @@ describe("slide generation", () => {
     vi.clearAllMocks();
   });
 
-  it("validates required story slides", () => {
-    expect(validateSlideDeck(DECK).slides).toHaveLength(4);
+  it("validates required outline slides", () => {
+    expect(validateSlideDeck(DECK).slides).toHaveLength(5);
     expect(() => validateSlideDeck({
       ...DECK,
       slides: DECK.slides.filter(slide => slide.kind !== "architecture"),
-    })).toThrow("between 4 and 8");
+    })).toThrow("between 5 and 8");
   });
 
   it("escapes generated HTML content", () => {
@@ -238,20 +254,30 @@ describe("slide generation", () => {
       purpose: "Approve the implementation",
     });
     createdProjects.push(project.id);
-    const story = await storeProjectJsonAsset(
+    const outline = await storeProjectJsonAsset(
       project.id,
-      "story",
+      "outline",
       {
-        context: "Problem, user story, and architecture approved.",
-        approvedSections: ["problem", "userStory", "architecture"],
+        problemStatement: "Teams lose time rebuilding presentation context.",
+        userScenarios: "Presenters refine one outline and generate reusable assets.",
+        solution: "A Copilot workflow creates architecture, slides, and speaker notes.",
+        status: "approved",
+        approvedAt: "2026-08-11T00:00:00.000Z",
       },
       [project.currentAssets.brief!],
     );
-    await storeProjectJsonAsset(
+    const architecture = await storeProjectJsonAsset(
       project.id,
       "architecture",
       GRAPH,
-      [story.asset.id],
+      [outline.asset.id],
+    );
+    const imageDerivedHtml = await storeProjectTextAsset(
+      project.id,
+      "architecture-image-derived-html",
+      "html",
+      "<!doctype html><html><body><main>Image-derived option six</main></body></html>",
+      [architecture.asset.id],
     );
     const session = {
       sendAndWait: vi.fn().mockResolvedValue({
@@ -265,22 +291,50 @@ describe("slide generation", () => {
 
     const response = await request(createApp())
       .post("/slides")
-      .send({ projectId: project.id });
+      .send({ projectId: project.id, architectureVisualMode: "image-html" });
 
     expect(response.status).toBe(201);
-    expect(response.body.deck.slides).toHaveLength(4);
+    expect(response.body.deck.slides).toHaveLength(5);
     expect(response.body.assets.model.type).toBe("slide-model");
     expect(response.body.assets.html.type).toBe("slide-deck");
     expect(response.body.assets.html.sourceAssetIds).toContain(
       response.body.assets.model.id,
+    );
+    expect(response.body.assets.html.sourceAssetIds).toContain(
+      imageDerivedHtml.asset.id,
+    );
+    expect(response.body.pptxDownloadUrl).toBe(
+      `/projects/${project.id}/slides/download.pptx`,
     );
 
     const preview = await request(createApp())
       .get(`/projects/${project.id}/slides/preview`);
     expect(preview.status).toBe(200);
     expect(preview.headers["content-type"]).toContain("text/html");
-    expect(preview.text).toContain("Web Workspace");
-    expect(preview.text).toContain("generate architecture");
+    expect(preview.text).toContain("Image-derived option six");
+    expect(preview.text).toContain("architecture-html-embed");
+    expect(preview.text).toContain("@scope (.architecture-html-embed)");
+    expect(preview.text).not.toContain("<iframe");
+    expect(preview.text).not.toContain("srcdoc=");
+    expect(preview.text).toContain("overflow:hidden!important;contain:layout paint");
+    expect(preview.text).toContain("slide-architecture-canvas");
+    expect(preview.text).toContain("width:100vw;height:100vh");
     expect(session.destroy).toHaveBeenCalledOnce();
+
+    const pptx = await request(createApp())
+      .get(`/projects/${project.id}/slides/download.pptx`);
+    expect(pptx.status).toBe(200);
+    expect(pptx.headers["content-type"]).toBe(
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    );
+    expect(pptx.headers["content-disposition"]).toContain(
+      'filename="presentation-slides-editable.pptx"',
+    );
+    expect(exportHtmlToEditablePptx).toHaveBeenCalledOnce();
+
+    const cachedPptx = await request(createApp())
+      .get(`/projects/${project.id}/slides/download.pptx`);
+    expect(cachedPptx.status).toBe(200);
+    expect(exportHtmlToEditablePptx).toHaveBeenCalledOnce();
   });
 });

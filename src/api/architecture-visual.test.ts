@@ -14,6 +14,7 @@ vi.mock("@azure/identity", () => ({
 }));
 
 import {
+  architectureImageConfiguration,
   generateArchitectureImage,
   parseArchitectureImage,
   validateArchitectureVisualLayout,
@@ -47,6 +48,7 @@ describe("architecture visual models", () => {
     expect(result).toEqual(parsed);
     expect(fetchMock.mock.calls[0][0]).toContain("images/generations");
     expect(fetchMock.mock.calls[1][0]).toContain("chat/completions");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).size).toBe("1536x1024");
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer test-token");
   });
 
@@ -58,6 +60,69 @@ describe("architecture visual models", () => {
     await expect(generateArchitectureImage("approved evidence")).rejects.toThrow(
       "Cognitive Services OpenAI User",
     );
+  });
+
+  it("retries transient DeploymentNotFound responses", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          error: { code: "DeploymentNotFound", message: "Try again." },
+        }), { status: 404 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          data: [{ b64_json: Buffer.from("png-image").toString("base64") }],
+        }), { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const generation = generateArchitectureImage("approved evidence");
+      await vi.advanceTimersByTimeAsync(750);
+
+      expect(Buffer.from(await generation).toString()).toBe("png-image");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses a native 16:9 canvas for GPT-Image-2", async () => {
+    vi.stubEnv("ARCHITECTURE_IMAGE_DEPLOYMENT", "gpt-image-2");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        data: [{ b64_json: Buffer.from("png-image").toString("base64") }],
+      }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await generateArchitectureImage("approved evidence");
+
+    const request = JSON.parse(String(fetchMock.mock.calls[0][1].body));
+    expect(request.size).toBe("1536x864");
+    expect(architectureImageConfiguration()).toEqual({
+      deployment: "gpt-image-2",
+      width: 1536,
+      height: 864,
+    });
+    expect(request.quality).toBe("high");
+    expect(request.output_format).toBe("png");
+  });
+
+  it("supports an unpersisted API key for local model development", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("ARCHITECTURE_MODEL_API_KEY", "local-test-key");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        data: [{ b64_json: Buffer.from("png-image").toString("base64") }],
+      }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await generateArchitectureImage("approved evidence");
+
+    expect(fetchMock.mock.calls[0][1].headers).toMatchObject({
+      "api-key": "local-test-key",
+      "Content-Type": "application/json",
+    });
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBeUndefined();
   });
 
   it("keeps image prompts below the model character limit", async () => {

@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { extname, join, resolve } from "node:path";
 import { Transform } from "node:stream";
@@ -15,6 +15,7 @@ import {
   currentSourceAssetIds,
   getProject,
   isProjectId,
+  readProjectBinaryAsset,
   storeProjectBinaryAsset,
   storeProjectJsonAsset,
 } from "./project-store.js";
@@ -111,6 +112,182 @@ async function saveUpload(
 router.get("/video/capabilities", async (_req, res) => {
   const capabilities = await checkVideoCapabilities();
   res.status(capabilities.available ? 200 : 503).json(capabilities);
+});
+
+router.post("/video/upload", async (req, res) => {
+  const projectId = typeof req.query.projectId === "string"
+    ? req.query.projectId.trim()
+    : "";
+  const project = isProjectId(projectId) ? await getProject(projectId) : null;
+  if (!project) {
+    res.status(isProjectId(projectId) ? 404 : 400).json({
+      error: "A valid presentation project ID is required.",
+    });
+    return;
+  }
+  const contentType = req.get("content-type")?.split(";")[0].trim().toLowerCase() || "";
+  if (!contentType.startsWith("video/") && contentType !== "application/octet-stream") {
+    res.status(415).json({ error: "Upload a video file as the raw request body." });
+    return;
+  }
+  let extension: string;
+  try {
+    extension = uploadExtension(req.get("x-file-name"));
+  } catch (error) {
+    res.status(415).json({ error: error instanceof Error ? error.message : "Invalid filename." });
+    return;
+  }
+  const jobId = randomUUID();
+  const jobDirectory = join(VIDEO_ROOT, jobId);
+  const sourcePath = join(jobDirectory, `source${extension}`);
+  try {
+    await cleanupExpiredJobs();
+    await mkdir(jobDirectory, { recursive: false });
+    const sizeBytes = await saveUpload(req, sourcePath);
+    const sourceAsset = await storeProjectBinaryAsset(
+      project.id,
+      "source-video",
+      extension.slice(1),
+      await readFile(sourcePath),
+      currentSourceAssetIds(project, [
+        "brief",
+        "outline",
+        "slide-model",
+        "slide-deck",
+        "speech-script",
+      ]),
+      {
+        uploadFilename: req.get("x-file-name") || null,
+        contentType,
+        sizeBytes,
+      },
+    );
+    res.status(201).json({
+      asset: sourceAsset.asset,
+      filename: req.get("x-file-name") || `recording${extension}`,
+      sizeBytes,
+    });
+  } catch (error) {
+    await rm(jobDirectory, { recursive: true, force: true });
+    if (error instanceof UploadLimitError) {
+      res.status(413).json({ error: error.message });
+      return;
+    }
+    res.status(422).json({
+      error: error instanceof Error ? error.message : "Recording upload failed.",
+    });
+  }
+});
+
+router.post("/video/refine-stored", async (req, res) => {
+  if (activeVideoJobs >= MAX_CONCURRENT_JOBS) {
+    res.status(429).json({
+      error: "The video processor is busy. Try again after the current render finishes.",
+    });
+    return;
+  }
+  const projectId = typeof req.body?.projectId === "string" ? req.body.projectId : "";
+  const project = isProjectId(projectId) ? await getProject(projectId) : null;
+  if (!project) {
+    res.status(isProjectId(projectId) ? 404 : 400).json({
+      error: "A valid presentation project ID is required.",
+    });
+    return;
+  }
+  const sourceAssetId = typeof req.body?.sourceAssetId === "string"
+    ? req.body.sourceAssetId
+    : project.currentAssets["source-video"];
+  const source = sourceAssetId
+    ? await readProjectBinaryAsset(project.id, sourceAssetId)
+    : null;
+  if (!source || source.asset.type !== "source-video") {
+    res.status(409).json({ error: "Upload a source recording before refinement." });
+    return;
+  }
+  const capabilities = await checkVideoCapabilities();
+  if (!capabilities.available) {
+    res.status(503).json({ error: "FFmpeg and FFprobe are required for video refinement." });
+    return;
+  }
+  const options = parseOptions((req.body?.options || {}) as Record<string, unknown>);
+  const jobId = randomUUID();
+  const jobDirectory = join(VIDEO_ROOT, jobId);
+  const sourcePath = join(jobDirectory, `source.${source.asset.format}`);
+  const outputPath = join(jobDirectory, "refined.mp4");
+  activeVideoJobs += 1;
+  try {
+    await cleanupExpiredJobs();
+    await mkdir(jobDirectory, { recursive: false });
+    await writeFile(sourcePath, source.content);
+    const processing = await refineVideo(sourcePath, outputPath, options);
+    const refinedAsset = await storeProjectBinaryAsset(
+      project.id,
+      "refined-video",
+      "mp4",
+      await readFile(outputPath),
+      [source.asset.id],
+      {
+        jobId,
+        outputDuration: processing.outputDuration,
+        inactiveEditCount: processing.acceleratedRanges.length,
+      },
+    );
+    const processingAsset = await storeProjectJsonAsset(
+      project.id,
+      "export",
+      {
+        kind: "video-refinement",
+        jobId,
+        options,
+        source: processing.source,
+        output: processing.output,
+        processing: {
+          acceleratedRanges: processing.acceleratedRanges,
+          filters: processing.filters,
+          originalDuration: processing.originalDuration,
+          outputDuration: processing.outputDuration,
+          durationChange: processing.durationChange,
+          warnings: processing.warnings,
+        },
+      },
+      [source.asset.id, refinedAsset.asset.id],
+      {
+        kind: "video-refinement",
+        jobId,
+        warningCount: processing.warnings.length,
+      },
+    );
+    res.status(201).json({
+      jobId,
+      source: processing.source,
+      output: {
+        metadata: processing.output,
+        downloadUrl: `/video/jobs/${jobId}/output`,
+      },
+      processing: {
+        acceleratedRanges: processing.acceleratedRanges,
+        filters: processing.filters,
+        originalDuration: processing.originalDuration,
+        outputDuration: processing.outputDuration,
+        durationChange: processing.durationChange,
+        warnings: processing.warnings,
+      },
+      assets: {
+        source: source.asset,
+        refined: refinedAsset.asset,
+        processing: processingAsset.asset,
+      },
+    });
+  } catch (error) {
+    await rm(jobDirectory, { recursive: true, force: true });
+    res.status(422).json({
+      error: error instanceof Error
+        ? `Video refinement failed: ${error.message.slice(0, 500)}`
+        : "Video refinement failed.",
+    });
+  } finally {
+    activeVideoJobs -= 1;
+  }
 });
 
 router.post("/video/refine", async (req, res) => {

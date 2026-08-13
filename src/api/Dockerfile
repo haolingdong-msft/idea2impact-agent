@@ -1,6 +1,7 @@
 FROM node:24-alpine AS build
 RUN corepack enable && corepack prepare pnpm@11.3.0 --activate
 WORKDIR /app
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
@@ -10,12 +11,13 @@ COPY routes/ ./routes/
 RUN pnpm exec tsc && pnpm prune --prod
 
 FROM node:24-alpine
-RUN apk add --no-cache ffmpeg && addgroup -S app && adduser -S app -G app
+RUN apk add --no-cache chromium ffmpeg && addgroup -S app && adduser -S app -G app
 WORKDIR /app
 COPY --from=build --chown=app:app /app/package.json ./
 COPY --from=build --chown=app:app /app/dist ./dist
 COPY --from=build --chown=app:app /app/node_modules ./node_modules
 ENV NODE_ENV=production
+ENV PPTX_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 USER app
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

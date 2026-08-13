@@ -8,7 +8,7 @@
     "azureModelVersion": { "value": "${AZURE_MODEL_VERSION=2025-04-16}" },
     "presentationAgentInvocationsEndpoint": { "value": "${PRESENTATION_AGENT_INVOCATIONS_ENDPOINT=}" },
     "architectureModelEndpoint": { "value": "${ARCHITECTURE_MODEL_ENDPOINT=}" },
-    "architectureImageDeployment": { "value": "${ARCHITECTURE_IMAGE_DEPLOYMENT=}" },
+    "architectureImageDeployment": { "value": "${ARCHITECTURE_IMAGE_DEPLOYMENT=gpt-image-2}" },
     "architectureVisionDeployment": { "value": "${ARCHITECTURE_VISION_DEPLOYMENT=}" }
   }
 }

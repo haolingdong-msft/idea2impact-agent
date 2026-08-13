@@ -17,7 +17,7 @@ products:
   - github
 urlFragment: copilot-sdk-service
 name: Presentation Agent — Story, Architecture, Slides, and Video with GitHub Copilot SDK
-description: A full-stack TypeScript application that turns an approved story into traceable HTML architecture and slide assets, then refines demo video.
+description: A full-stack TypeScript application that turns one approved outline into traceable architecture, slides, speaker notes, and refined demo video.
 ---
 <!-- YAML front-matter schema: https://review.learn.microsoft.com/en-us/help/contribute/samples/process/onboarding?branch=main#supported-metadata-fields-for-readmemd -->
 
@@ -28,13 +28,15 @@ description: A full-stack TypeScript application that turns an approved story in
 
 An architecture-first presentation workspace built with the
 [GitHub Copilot SDK](https://github.com/github/copilot-sdk), Express, React, and
-TypeScript. Users describe an idea, collaborate with Copilot to clarify the
-Problem Statement, User Story, and Architecture, then receive a validated graph
-rendered entirely with semantic HTML and CSS. Copilot then creates a
-presentation-ready HTML slide deck from the same approved context. A filesystem
-project manifest records the brief, story, architecture, slide model, generated
-HTML, revisions, and source-asset lineage. After slide generation, users can
-upload an existing demo recording, conservatively accelerate frozen/silent
+TypeScript. Users describe an idea and can optionally provide a GitHub repository.
+Copilot summarizes repository evidence and conversationally refines the Problem
+Statement, User Scenarios, and Solution in one central editable outline. Direct
+edits autosave, and the user approves the complete outline once. Copilot then
+creates five architecture options, a presentation-ready HTML slide deck, and
+editable speaker notes from the same approved context. A filesystem project
+manifest records the brief, outline revisions, architecture, slide model,
+speaker notes, generated HTML, and source-asset lineage. Users then upload and
+preserve an existing demo recording before conservatively accelerating frozen/silent
 ranges, improve perceived picture clarity, preview the result, and download a new
 MP4 without changing the source.
 
@@ -95,18 +97,25 @@ Here's a high level architecture diagram that illustrates these components. Noti
 
 The template is structured to follow the [Azure Developer CLI](https://aka.ms/azure-dev/overview) conventions. You can learn more about `azd` architecture in [the official documentation](https://learn.microsoft.com/azure/developer/azure-developer-cli/make-azd-compatible?pivots=azd-create#understand-the-azd-architecture).
 
-- **Backend** (`src/api/`) — Express API with project manifests, versioned asset
-  lineage, streaming collaboration chat, validated `/architecture` and `/slides`
-  generation, stored HTML deck preview/download, and `/video/refine` processing
-  backed by FFmpeg/FFprobe.
+- **Backend** (`src/api/`) — Express API with project manifests, versioned outline
+  drafts and approval, streaming collaboration chat, validated architecture,
+  slides, speaker-note generation, stored HTML deck preview/download, separate
+  recording upload, and FFmpeg/FFprobe refinement.
 - **Frontend** (`src/web/`) — React workspace with guided idea intake, workflow
-  approvals, responsive HTML/CSS architecture and slide rendering, deck
-  preview/download, and non-destructive video refinement controls.
+  Q&A, a central autosaved outline with one approval, responsive HTML/CSS
+  architecture and slide rendering, editable speaker notes, deck preview/download,
+  and non-destructive video refinement controls.
 
 The implemented path is:
 
-**Describe idea → Structure story → Generate HTML architecture → Generate HTML
-slides → Upload recording → Polish video**
+**Describe idea/codebase → Refine outline → Review/edit summary → Approve outline
+→ Generate slides → Generate speaker notes → Upload recording → Refine recording**
+
+For manual smoke testing, entering a GitHub repository URL also enables
+**Quick test: generate slides**. It scans the repository, generates and locks the
+initial codebase-grounded outline revision, then creates architecture visuals and
+slides in one run. The canonical workflow still uses the editable outline and
+explicit approval step.
 
 HTML slide generation is the required initial format; `.pptx` remains an optional
 future export.
@@ -149,6 +158,19 @@ const session = await client.createSession({
 ```
 
 Configure via environment variables: `MODEL_PROVIDER`, `MODEL_NAME`, `AZURE_OPENAI_ENDPOINT`. See `src/api/model-config.ts`.
+
+### Local and Hosted Agent Routing
+
+Local development uses the API's local Copilot SDK sessions by default, even if
+`PRESENTATION_AGENT_INVOCATIONS_ENDPOINT` is present in the selected azd
+environment. This path does not require a Foundry role assignment.
+
+- A loopback endpoint (`http://localhost` or `http://127.0.0.1`) enables local
+  hosted-agent integration.
+- Azure deployment explicitly enables the configured remote Hosted Agent
+  endpoint with `USE_HOSTED_AGENT=true`.
+- Set `USE_HOSTED_AGENT=true` to explicitly use a remote Hosted Agent locally,
+  or `USE_HOSTED_AGENT=false` to force local Copilot SDK sessions.
 
 ### Testing Each Model Path
 
@@ -214,6 +236,17 @@ curl -X POST http://localhost:3100/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "Hello"}'
 ```
+
+Architecture PNG generation uses the `gpt-image-2` deployment by default. Set
+`ARCHITECTURE_MODEL_ENDPOINT` to the Azure AI Services endpoint and override
+`ARCHITECTURE_IMAGE_DEPLOYMENT` only when using another deployment. GPT-Image-2
+outputs a native 16:9 `1536x864` canvas; older GPT image deployments retain
+their supported `1536x1024` size.
+
+Production image and vision requests use Managed Identity. Local development can
+set `ARCHITECTURE_MODEL_API_KEY` as a process-only fallback when the signed-in
+developer does not have the model data-plane role. Do not persist this key in
+source control, azd environment files, project assets, or browser storage.
 
 ### Local Development
 

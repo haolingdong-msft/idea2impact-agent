@@ -12,7 +12,13 @@ export interface PresentationBrief {
   repositoryUrl?: string
 }
 
-export type StorySection = 'problem' | 'userStory' | 'architecture'
+export interface PresentationOutline {
+  problemStatement: string
+  userScenarios: string
+  solution: string
+  status: 'draft' | 'approved'
+  approvedAt?: string
+}
 
 export type ArchitectureNodeKind =
   | 'actor'
@@ -51,6 +57,13 @@ export interface ArchitectureGraph {
     description: string
     technology: string
     componentNodeIds: string[]
+    toolings?: Array<{
+      id: string
+      label: string
+      description: string
+      technology: string
+      componentNodeId: string
+    }>
     provenance: 'confirmed' | 'assumed'
   }>
   workflow: {
@@ -62,6 +75,8 @@ export interface ArchitectureGraph {
       label: string
       userAction: string
       platformCalls: Array<{
+        platformId: string
+        toolingId: string
         nodeId: string
         action: string
         mechanism: string
@@ -103,14 +118,17 @@ export interface ArchitectureVisualLayout {
 }
 
 export interface ArchitectureVisual {
-  mode: 'dual' | 'html' | 'image' | 'legacy'
+  mode: 'dual' | ArchitectureVisualMode | 'legacy'
   imageUrl?: string
+  pptxDownloadUrl?: string
   narrativeImageUrl?: string
   htmlUrl?: string
   validatedJsonHtmlUrl?: string
+  imageDerivedHtmlUrl?: string
   narrativeHtmlUrl?: string
   layout?: ArchitectureVisualLayout
   fallbackReason?: string
+  failures?: Array<{ mode: ArchitectureVisualMode; error: string }>
 }
 
 export type ArchitectureVisualMode =
@@ -119,13 +137,24 @@ export type ArchitectureVisualMode =
   | 'narrative-image'
   | 'narrative-html'
   | 'validated-json-html'
+  | 'image-html'
 
 export type SlideKind =
   | 'title'
   | 'problem'
-  | 'user-story'
+  | 'user-scenarios'
+  | 'solution'
   | 'architecture'
   | 'summary'
+
+export interface SpeechScript {
+  title: string
+  notes: Array<{
+    slideId: string
+    slideTitle: string
+    script: string
+  }>
+}
 
 export interface Slide {
   id: string
@@ -147,6 +176,7 @@ export interface SlideGenerationResult {
   deck: SlideDeck
   previewUrl: string
   downloadUrl: string
+  pptxDownloadUrl: string
 }
 
 export interface ProjectAsset {
@@ -212,6 +242,12 @@ export interface VideoRefinementOptions {
   minimumInactiveDuration: number
   clarity: 'none' | 'standard' | 'strong'
   resolution: 'source' | '1080p' | '4k'
+}
+
+export interface UploadedRecording {
+  asset: ProjectAsset
+  filename: string
+  sizeBytes: number
 }
 
 export interface VideoRefinementResult {

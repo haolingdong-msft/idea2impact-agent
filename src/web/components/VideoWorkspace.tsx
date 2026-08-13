@@ -23,12 +23,29 @@ function formatBytes(bytes: number): string {
 interface Props {
   projectId?: string
   standalone?: boolean
+  onUploadComplete?: () => void
+  onRefinementComplete?: () => void
 }
 
-export function VideoWorkspace({ projectId, standalone = false }: Props) {
+export function VideoWorkspace({
+  projectId,
+  standalone = false,
+  onUploadComplete,
+  onRefinementComplete,
+}: Props) {
   const [file, setFile] = useState<File | null>(null)
   const [options, setOptions] = useState(DEFAULT_OPTIONS)
-  const { result, isProcessing, error, refineVideo } = useVideoRefinement()
+  const {
+    result,
+    upload,
+    isUploading,
+    isProcessing,
+    error,
+    uploadVideo,
+    refineUploadedVideo,
+    refineVideo,
+    clearUpload,
+  } = useVideoRefinement()
   const sourcePreview = useMemo(() => file ? URL.createObjectURL(file) : null, [file])
 
   useEffect(() => () => {
@@ -37,7 +54,19 @@ export function VideoWorkspace({ projectId, standalone = false }: Props) {
 
   const submit = async () => {
     if (!file) return
-    await refineVideo(file, options, projectId)
+    if (standalone || !projectId) {
+      await refineVideo(file, options, projectId)
+      onRefinementComplete?.()
+      return
+    }
+    await uploadVideo(file, projectId)
+    onUploadComplete?.()
+  }
+
+  const refine = async () => {
+    if (!projectId || !upload) return
+    await refineUploadedVideo(projectId, upload.asset.id, options)
+    onRefinementComplete?.()
   }
 
   return (
@@ -45,13 +74,15 @@ export function VideoWorkspace({ projectId, standalone = false }: Props) {
       <header className="video-heading">
         <div>
           <span className="eyebrow">
-            {standalone ? 'Start directly / Video polish' : 'Next / Demo recording'}
+            {standalone ? 'Start directly / Video polish' : 'Steps 07-08 / Recording'}
           </span>
-          <h2 id="video-workspace-title">Refine an existing video</h2>
+          <h2 id="video-workspace-title">
+            {standalone ? 'Refine an existing video' : 'Upload, then refine the recording'}
+          </h2>
           <p>
             {standalone
               ? 'Skip slide creation and upload a recording now. The agent detects low-motion idle ranges, improves perceived clarity, and renders a shorter MP4.'
-              : 'Upload a source recording. The agent inspects it, accelerates conservative inactive ranges, improves perceived clarity, and renders a new MP4.'}
+              : 'First preserve the source recording as a project asset. Then inspect it, accelerate conservative inactive ranges, improve perceived clarity, and render a new MP4.'}
           </p>
         </div>
         <span className="source-safe-badge">Source stays unchanged</span>
@@ -63,7 +94,10 @@ export function VideoWorkspace({ projectId, standalone = false }: Props) {
             <input
               type="file"
               accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.m4v"
-              onChange={event => setFile(event.target.files?.[0] || null)}
+              onChange={event => {
+                setFile(event.target.files?.[0] || null)
+                clearUpload()
+              }}
             />
             <span className="upload-mark">{file ? 'OK' : 'UP'}</span>
             <div>
@@ -148,11 +182,29 @@ export function VideoWorkspace({ projectId, standalone = false }: Props) {
           <button
             type="button"
             className="refine-button"
-            disabled={!file || isProcessing}
+            disabled={!file || isProcessing || isUploading || (!standalone && Boolean(upload))}
             onClick={() => void submit()}
           >
-            {isProcessing ? 'Inspecting and rendering a new video...' : 'Create refined video'}
+            {standalone
+              ? isProcessing
+                ? 'Inspecting and rendering a new video...'
+                : 'Create refined video'
+              : isUploading
+                ? 'Uploading source recording...'
+                : upload
+                  ? 'Source recording uploaded'
+                  : 'Upload source recording'}
           </button>
+          {!standalone && upload && (
+            <button
+              type="button"
+              className="refine-button refine-stored-button"
+              disabled={isProcessing}
+              onClick={() => void refine()}
+            >
+              {isProcessing ? 'Inspecting and rendering...' : 'Refine uploaded recording'}
+            </button>
+          )}
         </div>
 
         <div className="video-preview">

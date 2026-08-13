@@ -123,6 +123,7 @@ const result: SlideGenerationResult = {
   },
   previewUrl: '/preview',
   downloadUrl: '/download',
+  pptxDownloadUrl: '/download.pptx',
 }
 
 describe('SlideWorkspace', () => {
@@ -139,7 +140,7 @@ describe('SlideWorkspace', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Generate slides + 5 designs' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate slides' }))
     expect(onGenerate).toHaveBeenCalledOnce()
   })
 
@@ -165,24 +166,22 @@ describe('SlideWorkspace', () => {
       'href',
       '/download',
     )
+    expect(screen.getByRole('link', { name: 'Download editable PPTX' })).toHaveAttribute(
+      'href',
+      '/download.pptx',
+    )
     expect(container.querySelector('svg')).not.toBeInTheDocument()
   })
 
-  it('shows all five generated architecture choices for slides', () => {
-    const onArchitectureModeChange = vi.fn()
+  it('does not show obsolete architecture design choices', () => {
     render(
       <SlideWorkspace
         architecture={architecture}
         visual={{
-          mode: 'dual',
-          htmlUrl: '/architecture.html',
-          validatedJsonHtmlUrl: '/architecture-validated-json.html',
+          mode: 'image',
           imageUrl: '/architecture.png',
-          narrativeImageUrl: '/architecture-narrative.png',
-          narrativeHtmlUrl: '/architecture-narrative.html',
         }}
         architectureMode="image"
-        onArchitectureModeChange={onArchitectureModeChange}
         result={null}
         isGenerating={false}
         error={null}
@@ -190,13 +189,9 @@ describe('SlideWorkspace', () => {
       />,
     )
 
-    expect(screen.getByText('All five were generated. The selected design is used by the deck.'))
-      .toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Agent narrative → HTML/CSS' }))
-    expect(onArchitectureModeChange).toHaveBeenCalledWith('narrative-html')
-    fireEvent.click(screen.getByRole('button', {
-      name: 'Validated JSON → Copilot HTML/CSS',
-    }))
-    expect(onArchitectureModeChange).toHaveBeenCalledWith('validated-json-html')
+    expect(screen.queryByText('All three were generated. The selected design is used by the deck.'))
+      .not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'GPT-Image-2 → HTML/CSS' }))
+      .not.toBeInTheDocument()
   })
 })

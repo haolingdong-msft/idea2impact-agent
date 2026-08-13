@@ -8,6 +8,8 @@ import projectRoutes from "./routes/projects.js";
 import slideRoutes from "./routes/slides.js";
 import repositoryRoutes from "./routes/repository.js";
 import githubAuthRoutes from "./routes/github-auth.js";
+import outlineRoutes from "./routes/outline.js";
+import speechRoutes from "./routes/speech.js";
 import { authorizeProjectRequest } from "./routes/project-authorization.js";
 
 const app = express();
@@ -28,7 +30,9 @@ app.use(githubAuthRoutes);
 app.use(authorizeProjectRequest);
 app.use(projectRoutes);
 app.use(repositoryRoutes);
+app.use(outlineRoutes);
 app.use(slideRoutes);
+app.use(speechRoutes);
 app.use(chatRoutes);
 app.use(architectureRoutes);
 app.use(videoRoutes);

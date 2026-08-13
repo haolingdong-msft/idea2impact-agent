@@ -1,11 +1,12 @@
 import './App.css'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ArchitectureCanvas } from './components/ArchitectureCanvas'
 import { ChatWindow } from './components/ChatWindow'
 import { IdeaBrief } from './components/IdeaBrief'
 import { MessageInput } from './components/MessageInput'
+import { OutlineWorkspace } from './components/OutlineWorkspace'
 import { SlideWorkspace } from './components/SlideWorkspace'
-import { StoryApproval } from './components/StoryApproval'
+import { SpeechWorkspace } from './components/SpeechWorkspace'
 import { VideoWorkspace } from './components/VideoWorkspace'
 import { WorkflowRail } from './components/WorkflowRail'
 import { useArchitecture } from './hooks/useArchitecture'
@@ -14,23 +15,36 @@ import { useService } from './hooks/useService'
 import { useSlides } from './hooks/useSlides'
 import { useRepository } from './hooks/useRepository'
 import { useGitHubAuth } from './hooks/useGitHubAuth'
-import {
-  isStoryApprovalMessage,
-  nextStorySection,
-  storyApprovalsFromMessages,
-} from './story-approval'
-import type { ArchitectureVisualMode, PresentationBrief, StorySection } from './types'
+import { useOutline } from './hooks/useOutline'
+import { useSpeechScript } from './hooks/useSpeechScript'
+import type { ArchitectureVisualMode, PresentationBrief } from './types'
 
 export default function App() {
   const { messages, isLoading, sendMessage, resetConversation } = useService()
-  const { architecture, visual, isGenerating, error, generateArchitecture } = useArchitecture()
+  const {
+    architecture,
+    visual,
+    progress: architectureProgress,
+    isGenerating,
+    error,
+    generateArchitecture,
+  } = useArchitecture()
   const {
     project,
-    isSaving,
+    isSaving: isSavingProject,
     error: projectError,
     createPresentationProject,
-    saveApprovedStory,
   } = useProject()
+  const {
+    outline,
+    isGenerating: isGeneratingOutline,
+    isSaving: isSavingOutline,
+    error: outlineError,
+    generateOutline,
+    updateOutline,
+    approveOutline,
+    resetOutline,
+  } = useOutline()
   const {
     result: slideResult,
     isGenerating: isGeneratingSlides,
@@ -38,12 +52,22 @@ export default function App() {
     generateSlides,
     clearSlides,
   } = useSlides()
+  const {
+    script,
+    setScript,
+    isGenerating: isGeneratingSpeech,
+    isSaving: isSavingSpeech,
+    error: speechError,
+    generateScript,
+    saveScript,
+    clearScript,
+  } = useSpeechScript()
   const [brief, setBrief] = useState<PresentationBrief | null>(null)
-  const [approvedSections, setApprovedSections] = useState<StorySection[]>([])
-  const [lastApprovalAssistantCount, setLastApprovalAssistantCount] = useState(0)
+  const [architectureView, setArchitectureView] = useState<ArchitectureVisualMode>('image')
+  const [recordingUploaded, setRecordingUploaded] = useState(false)
+  const [recordingRefined, setRecordingRefined] = useState(false)
   const [quickStatus, setQuickStatus] = useState<string | null>(null)
   const [quickError, setQuickError] = useState<string | null>(null)
-  const [architectureView, setArchitectureView] = useState<ArchitectureVisualMode>('image')
   const {
     evidence: repositoryEvidence,
     isScanning,
@@ -58,158 +82,134 @@ export default function App() {
   const startProject = async (nextBrief: PresentationBrief) => {
     try {
       resetConversation()
+      resetOutline()
+      clearSlides()
       const createdProject = await createPresentationProject(nextBrief)
       setBrief(nextBrief)
-      setApprovedSections([])
-      setLastApprovalAssistantCount(0)
       if (nextBrief.repositoryUrl) {
         try {
           await scanRepository(createdProject.id, nextBrief.repositoryUrl)
         } catch {
-          // Continue into clarification and show the scan error in the workspace.
+          // Continue with the user brief; the repository error remains visible.
         }
       }
+      await generateOutline(createdProject.id, [])
       await sendMessage(nextBrief.idea, nextBrief, createdProject.id)
     } catch {
-      // The project hook exposes the actionable error beside the brief.
+      // Hooks expose actionable errors in the workspace.
     }
   }
 
-  const quickGeneratePresentation = async (nextBrief: PresentationBrief) => {
+  const sendOutlineMessage = async (message: string) => {
+    if (!project) return
+    const updatedMessages = await sendMessage(
+      message,
+      undefined,
+      project.id,
+      slideResult ? 'refinement' : 'initial',
+    )
+    if (updatedMessages) {
+      await generateOutline(project.id, updatedMessages)
+      clearSlides()
+      clearScript()
+      setRecordingUploaded(false)
+      setRecordingRefined(false)
+    }
+  }
+
+  const quickTestCodebase = async (nextBrief: PresentationBrief) => {
+    if (!nextBrief.repositoryUrl) return
     setQuickError(null)
     try {
       resetConversation()
+      resetOutline()
       clearSlides()
-      setQuickStatus('Creating presentation project...')
+      clearScript()
+      setRecordingUploaded(false)
+      setRecordingRefined(false)
+      setQuickStatus('Creating project...')
       const createdProject = await createPresentationProject(nextBrief)
       setBrief(nextBrief)
-      setApprovedSections(['problem', 'userStory', 'architecture'])
-      if (nextBrief.repositoryUrl) {
-        setQuickStatus('Scanning codebase for architecture evidence...')
-        await scanRepository(createdProject.id, nextBrief.repositoryUrl)
-      }
-      const directContext = [
-        'Quick generation mode: derive the Problem Statement, User Story, and high-level Architecture directly from the supplied idea and optional codebase evidence.',
-        `Idea: ${nextBrief.idea}`,
-        `Audience: ${nextBrief.audience || 'Not specified'}`,
-        `Purpose: ${nextBrief.purpose || 'Not specified'}`,
-      ].join('\n')
-      setQuickStatus('Preparing grounded presentation story...')
-      await saveApprovedStory(
+      setQuickStatus('Scanning codebase...')
+      await scanRepository(createdProject.id, nextBrief.repositoryUrl)
+      setQuickStatus('Generating codebase-grounded outline...')
+      const draft = await generateOutline(createdProject.id, [])
+      setQuickStatus('Locking quick-test outline revision...')
+      const approved = await approveOutline(createdProject.id, draft)
+      setQuickStatus('Generating architecture designs...')
+      await generateArchitecture(
+        nextBrief,
+        JSON.stringify(approved),
         createdProject.id,
-        directContext,
-        ['problem', 'userStory', 'architecture'],
+        true,
       )
-      setQuickStatus('Generating HTML/CSS and image-model architecture designs...')
-      await generateArchitecture(nextBrief, directContext, createdProject.id, true)
-      setQuickStatus('Composing slide deck...')
+      setQuickStatus('Generating slides...')
       await generateSlides(createdProject.id, architectureView)
       setQuickStatus(null)
     } catch (caught) {
       setQuickStatus(null)
       setQuickError(
-        caught instanceof Error ? caught.message : 'Quick slide generation failed.',
+        caught instanceof Error ? caught.message : 'Codebase quick test failed.',
       )
     }
   }
 
-  const approveSection = async (section: StorySection) => {
-    const assistantCount = messages.filter(
-      message => message.role === 'assistant' && message.content.trim(),
-    ).length
-    setLastApprovalAssistantCount(assistantCount)
-    setApprovedSections(current => current.includes(section) ? current : [...current, section])
-    const nextPrompt: Record<StorySection, string> = {
-      problem: 'I approve the Problem Statement. Continue to the User Story, summarize it, and ask for approval.',
-      userStory: 'I approve the User Story. Continue to the Architecture, summarize it, and ask for approval.',
-      architecture: 'I approve the Architecture. Provide the final narrative summary grounded in all three approved sections.',
-    }
-    await sendMessage(nextPrompt[section], undefined, project?.id)
-  }
-
-  const generateApprovedArchitecture = async () => {
-    if (!brief || !project || approvedSections.length !== 3) return
-    const context = messages
-      .filter(message => message.role !== 'error' && message.content.trim())
-      .map(message => `${message.role.toUpperCase()}: ${message.content}`)
-      .join('\n\n')
+  const approveCurrentOutline = async () => {
+    if (!project) return
     try {
-      clearSlides()
-      await saveApprovedStory(project.id, context, approvedSections)
-      await generateArchitecture(brief, context, project.id, false)
+      await approveOutline(project.id)
     } catch {
-      // Storage and generation hooks expose errors in the workspace.
-    }
-  }
-
-  const generateApprovedSlides = async () => {
-    if (!brief || !project) return
-    const context = messages
-      .filter(message => message.role !== 'error' && message.content.trim())
-      .map(message => `${message.role.toUpperCase()}: ${message.content}`)
-      .join('\n\n')
-    try {
-      await generateArchitecture(brief, context, project.id, true)
-      await generateSlides(project.id, architectureView)
-    } catch {
-      // The slide hook exposes the actionable error in the slide workspace.
+      // The outline hook exposes the approval error.
     }
   }
 
   const generateApprovedPresentation = async () => {
-    if (!brief || !project || approvedSections.length !== 3) return
-    const context = messages
-      .filter(message => message.role !== 'error' && message.content.trim())
-      .map(message => `${message.role.toUpperCase()}: ${message.content}`)
-      .join('\n\n')
+    if (!brief || !project || outline?.status !== 'approved') return
+    setQuickError(null)
     try {
       clearSlides()
-      await saveApprovedStory(project.id, context, approvedSections)
+      clearScript()
+      setRecordingUploaded(false)
+      setRecordingRefined(false)
+      const context = JSON.stringify(outline)
+      setQuickStatus('Generating architecture design...')
       await generateArchitecture(brief, context, project.id, true)
+      setQuickStatus('Composing slide deck...')
       await generateSlides(project.id, architectureView)
-    } catch {
-      // The project, architecture, and slide hooks expose actionable errors.
+      setQuickStatus(null)
+    } catch (caught) {
+      setQuickStatus(null)
+      setQuickError(
+        caught instanceof Error ? caught.message : 'Slide generation failed.',
+      )
     }
   }
 
-  const hasAssistantResponse = messages.some(
-    message => message.role === 'assistant' && message.content.trim().length > 0,
+  const outlineComplete = Boolean(
+    outline &&
+    outline.problemStatement.trim().length >= 20 &&
+    outline.userScenarios.trim().length >= 20 &&
+    outline.solution.trim().length >= 20,
   )
-  const assistantResponseCount = messages.filter(
-    message => message.role === 'assistant' && message.content.trim(),
-  ).length
-  const approvalReady = hasAssistantResponse &&
-    assistantResponseCount > lastApprovalAssistantCount &&
-    !isLoading
-
-  useEffect(() => {
-    const approvals = storyApprovalsFromMessages(
-      messages
-        .filter(message => message.role === 'user')
-        .map(message => message.content),
-    )
-    setApprovedSections(current =>
-      approvals.length > current.length ? approvals : current)
-  }, [messages])
-
-  const sendStoryMessage = async (message: string) => {
-    if (slideResult) {
-      await sendMessage(message, undefined, project?.id, 'refinement')
-      return
-    }
-    const nextSection = nextStorySection(approvedSections)
-    if (
-      nextSection &&
-      approvalReady &&
-      isStoryApprovalMessage(message, nextSection)
-    ) {
-      await approveSection(nextSection)
-      return
-    }
-    await sendMessage(message, undefined, project?.id)
-  }
-
-  const activeStep = slideResult ? 4 : architecture ? 3 : brief ? 1 : 0
+  const activeStep = !brief
+    ? 0
+    : outline?.status !== 'approved'
+      ? outlineComplete ? 3 : outline ? 2 : 1
+      : !slideResult
+        ? 4
+        : !script
+          ? 5
+          : !recordingUploaded
+            ? 6
+            : !recordingRefined
+              ? 7
+              : 8
+  const outlineBusy =
+    isLoading ||
+    isGeneratingOutline ||
+    isGenerating ||
+    isGeneratingSlides ||
+    isGeneratingSpeech
 
   return (
     <div className="app-shell">
@@ -237,14 +237,44 @@ export default function App() {
           </div>
           <div className="header-actions">
             <span className="status-pill"><i /> Workspace ready</span>
-            {brief && architecture && (
-              <button className="ghost-button" onClick={() => void generateApprovedArchitecture()}>
-                Regenerate graph
-              </button>
-            )}
           </div>
         </header>
         {quickStatus && <p className="quick-status" role="status">{quickStatus}</p>}
+        {architectureProgress && architectureProgress.status !== 'idle' && (
+          <section
+            className={`generation-progress ${architectureProgress.status}`}
+            aria-live="polite"
+          >
+            <div className="generation-progress-heading">
+              <strong>{architectureProgress.stage}</strong>
+              <span>{architectureProgress.percent}%</span>
+            </div>
+            <progress max="100" value={architectureProgress.percent} />
+            <div className="generation-task-list">
+              {architectureProgress.tasks.map(task => (
+                <span
+                  className={task.status}
+                  key={task.id}
+                  title={task.error}
+                >
+                  <i />
+                  {task.label}
+                  {task.status === 'failed' ? ` — ${task.error}` : ''}
+                </span>
+              ))}
+            </div>
+            {architectureProgress.startedAt && (
+              <small>
+                Started {new Date(architectureProgress.startedAt).toLocaleTimeString()}
+                {' · '}
+                {architectureProgress.completedTasks}/{architectureProgress.totalTasks} designs complete
+              </small>
+            )}
+            {architectureProgress.error && (
+              <p role="alert">{architectureProgress.error}</p>
+            )}
+          </section>
+        )}
         {quickError && <p className="project-error" role="alert">{quickError}</p>}
 
         {!brief ? (
@@ -252,9 +282,9 @@ export default function App() {
             <div className="onboarding-layout">
               <div>
                 <IdeaBrief
-                  isLoading={isGenerating || isLoading || isSaving || isScanning}
+                  isLoading={isSavingProject || isScanning || isLoading || isGeneratingOutline}
                   onSubmit={briefValue => void startProject(briefValue)}
-                  onQuickGenerate={briefValue => void quickGeneratePresentation(briefValue)}
+                  onQuickTest={briefValue => void quickTestCodebase(briefValue)}
                   githubStatus={githubStatus}
                   onGitHubLogout={() => void logoutGitHub()}
                 />
@@ -266,33 +296,26 @@ export default function App() {
           </>
         ) : (
           <>
-            <div className="project-layout">
+            <div className="project-layout outline-project-layout">
               <div className="canvas-panel">
-                <ArchitectureCanvas
-                  architecture={architecture}
-                  visual={visual}
-                  isLoading={isGenerating}
-                  error={error}
-                  selectedMode={architectureView}
-                  onSelectedModeChange={setArchitectureView}
+                <OutlineWorkspace
+                  outline={outline}
+                  isBusy={outlineBusy}
+                  isSaving={isSavingOutline}
+                  error={outlineError || error || slideError}
+                  onChange={value => project && updateOutline(project.id, value)}
+                  onApprove={() => void approveCurrentOutline()}
+                  onGenerate={() => void generateApprovedPresentation()}
                 />
               </div>
               <aside className="copilot-panel">
                 <header>
                   <div className="copilot-avatar">C</div>
                   <div>
-                    <strong>Story copilot</strong>
-                    <span>Problem / User / Architecture</span>
+                    <strong>Outline copilot</strong>
+                    <span>Problem / Scenarios / Solution</span>
                   </div>
                 </header>
-                <StoryApproval
-                  approved={approvedSections}
-                  canApprove={approvalReady}
-                  isGenerating={isGenerating || isGeneratingSlides}
-                  isRefining={Boolean(slideResult)}
-                  onApprove={section => void approveSection(section)}
-                  onGenerate={() => void generateApprovedPresentation()}
-                />
                 {repositoryEvidence && (
                   <div className="repository-status">
                     <strong>{repositoryEvidence.repository.owner}/{repositoryEvidence.repository.name}</strong>
@@ -305,13 +328,27 @@ export default function App() {
                 {repositoryError && (
                   <p className="project-error" role="alert">{repositoryError}</p>
                 )}
-                <ChatWindow messages={messages} isStreaming={isLoading} />
+                <ChatWindow messages={messages} isStreaming={isLoading || isGeneratingOutline} />
                 <MessageInput
-                  onSend={message => void sendStoryMessage(message)}
-                  disabled={isLoading}
+                  onSend={message => void sendOutlineMessage(message)}
+                  disabled={isLoading || isGeneratingOutline}
                 />
               </aside>
             </div>
+
+            {architecture && (
+              <section className="generated-architecture-section">
+                <ArchitectureCanvas
+                  architecture={architecture}
+                  visual={visual}
+                  isLoading={isGenerating}
+                  error={error}
+                  selectedMode={architectureView}
+                  onSelectedModeChange={setArchitectureView}
+                />
+              </section>
+            )}
+
             {architecture && (
               <SlideWorkspace
                 architecture={architecture}
@@ -321,10 +358,27 @@ export default function App() {
                 error={slideError}
                 architectureMode={architectureView}
                 onArchitectureModeChange={setArchitectureView}
-                onGenerate={() => void generateApprovedSlides()}
+                onGenerate={() => void generateApprovedPresentation()}
               />
             )}
-            {slideResult && <VideoWorkspace projectId={project?.id} />}
+            {slideResult && (
+              <SpeechWorkspace
+                script={script}
+                isGenerating={isGeneratingSpeech}
+                isSaving={isSavingSpeech}
+                error={speechError}
+                onGenerate={() => void generateScript(project.id)}
+                onChange={setScript}
+                onSave={() => script && void saveScript(project.id, script)}
+              />
+            )}
+            {script && (
+              <VideoWorkspace
+                projectId={project.id}
+                onUploadComplete={() => setRecordingUploaded(true)}
+                onRefinementComplete={() => setRecordingRefined(true)}
+              />
+            )}
           </>
         )}
       </main>

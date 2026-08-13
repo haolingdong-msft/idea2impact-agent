@@ -204,10 +204,10 @@ describe("POST /chat", () => {
       const prompt = session.send.mock.calls[0][0].prompt;
       expect(prompt).toContain("POST-GENERATION REFINEMENT MODE");
       expect(prompt).toContain("do not ask for approval");
-      expect(prompt).toContain("requested Problem Statement, User Story, or Architecture part");
+      expect(prompt).toContain("requested Problem Statement, User Scenarios, or Solution part");
     });
 
-    it("configures the fixed three-section presentation workflow", async () => {
+    it("configures the combined outline presentation workflow", async () => {
       const session = createMockSession({ deltas: ["Problem statement"] });
       const createSession = vi.fn().mockResolvedValue(session);
       (getClient as Mock).mockResolvedValue({ createSession });
@@ -219,8 +219,9 @@ describe("POST /chat", () => {
 
       const instructions = createSession.mock.calls[0][0].systemMessage.content;
       expect(instructions).toContain(
-        "Problem Statement -> User Story -> Architecture",
+        "Problem Statement -> User Scenarios -> Solution",
       );
+      expect(instructions).toContain("Never ask the user to approve an individual section");
       expect(instructions).toContain(
         "Never ask what the user wants done with the repository",
       );

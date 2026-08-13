@@ -41,6 +41,27 @@ function streaming(deltas: string[]) {
   };
 }
 
+function structuredStreaming(content: string, emitIdle = true) {
+  const handlers: Record<string, ((event: unknown) => void)[]> = {};
+  return {
+    on: vi.fn((event: string, callback: (event: unknown) => void) => {
+      handlers[event] ??= [];
+      handlers[event].push(callback);
+      return () => {
+        handlers[event] = handlers[event].filter(item => item !== callback);
+      };
+    }),
+    send: vi.fn(async () => {
+      handlers["assistant.message"]?.forEach(callback =>
+        callback({ data: { content } }));
+      if (emitIdle) {
+        handlers["session.idle"]?.forEach(callback => callback({}));
+      }
+    }),
+    destroy: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
 describe("Foundry invocations adapter", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -110,7 +131,7 @@ describe("Foundry invocations adapter", () => {
     expect(prompt).toContain(
       "Do not ask what task to perform on the repository",
     );
-    expect(prompt).toContain("Problem Statement, User Story, or Architecture");
+    expect(prompt).toContain("Problem Statement, User Scenarios, or Solution");
   });
 
   it("does not restart approvals for post-generation refinement", async () => {
@@ -130,7 +151,7 @@ describe("Foundry invocations adapter", () => {
     expect(response.status).toBe(200);
     const prompt = session.send.mock.calls[0][0].prompt;
     expect(prompt).toContain("POST-GENERATION REFINEMENT MODE");
-    expect(prompt).toContain("Do not restart the three-step workflow");
+    expect(prompt).toContain("Do not restart the outline workflow");
     expect(prompt).toContain("or ask for approval");
   });
 
@@ -154,6 +175,81 @@ describe("Foundry invocations adapter", () => {
     expect(response.status).toBe(200);
     expect(response.body.operation).toBe("architecture");
     expect(response.body.result.content).toContain("Architecture");
+    const prompt = session.sendAndWait.mock.calls[0][0].prompt;
+    expect(prompt).toContain('"platforms"');
+    expect(prompt).toContain('"toolings"');
+    expect(prompt).toContain('"platformCalls"');
+    expect(prompt).toContain('"toolingId"');
+    expect(session.destroy).toHaveBeenCalledOnce();
+  });
+
+  it("returns a structured combined outline", async () => {
+    const session = oneShot(JSON.stringify({
+      problemStatement: "Teams lose presentation context.",
+      userScenarios: "Presenters refine one shared outline.",
+      solution: "Copilot generates grounded presentation assets.",
+    }));
+    (getClient as Mock).mockResolvedValue({
+      createSession: vi.fn().mockResolvedValue(session),
+    });
+    const response = await request(app).post("/invocations").send({
+      version: "1.0",
+      operation: "outline",
+      input: {
+        brief: { idea: "Build a presentation agent." },
+        currentOutline: {},
+        conversation: "user: Build a presentation agent.",
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(response.body.operation).toBe("outline");
+    const prompt = session.sendAndWait.mock.calls[0][0].prompt;
+    expect(prompt).toContain("problemStatement");
+    expect(prompt).toContain("CURRENT OUTLINE");
+    expect(prompt).toContain("automatically summarize the codebase");
+    expect(prompt).toContain("repository evidence is absent");
+    expect(prompt).toContain("complete initial version");
+    expect(prompt).not.toContain("approve each");
+  });
+
+  it("returns slide-grounded speech script content", async () => {
+    const session = oneShot(JSON.stringify({
+      title: "Speaker notes",
+      notes: [],
+    }));
+    (getClient as Mock).mockResolvedValue({
+      createSession: vi.fn().mockResolvedValue(session),
+    });
+    const response = await request(app).post("/invocations").send({
+      version: "1.0",
+      operation: "speech-script",
+      input: {
+        outline: { status: "approved" },
+        deck: { slides: [] },
+      },
+    });
+    expect(response.status).toBe(200);
+    const prompt = session.sendAndWait.mock.calls[0][0].prompt;
+    expect(prompt).toContain("speaker notes");
+    expect(prompt).toContain("APPROVED OUTLINE");
+    expect(prompt).toContain("SLIDE DECK");
+  });
+
+  it("returns structured content without waiting for session idle", async () => {
+    const session = structuredStreaming('{"title":"Architecture"}', false);
+    (getClient as Mock).mockResolvedValue({
+      createSession: vi.fn().mockResolvedValue(session),
+    });
+
+    const response = await request(app).post("/invocations").send({
+      version: "1.0",
+      operation: "architecture",
+      input: { idea: "Build a technical presentation creation agent." },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.result.content).toContain("Architecture");
+    expect(session.send).toHaveBeenCalledOnce();
     expect(session.destroy).toHaveBeenCalledOnce();
   });
 
@@ -201,6 +297,36 @@ describe("Foundry invocations adapter", () => {
     expect(prompt).toContain("data-connector");
     expect(prompt).toContain("Never use SVG");
     expect(prompt).toContain("dedicated CSS Grid/Flex cell");
+  });
+
+  it("passes the GPT-Image-2 reference directly to Copilot", async () => {
+    const session = oneShot("<!doctype html><html></html>");
+    (getClient as Mock).mockResolvedValue({
+      createSession: vi.fn().mockResolvedValue(session),
+    });
+    const response = await request(app).post("/invocations").send({
+      version: "1.0",
+      operation: "architecture-image-html",
+      input: {
+        idea: "Build a technical presentation creation agent.",
+        context: "Validated architecture JSON",
+        imageMediaType: "image/png",
+        imageBase64: Buffer.from([
+          0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+        ]).toString("base64"),
+      },
+    });
+
+    expect(response.status).toBe(200);
+    const message = session.sendAndWait.mock.calls[0][0];
+    expect(message.prompt).toContain("visual source of truth");
+    expect(message.prompt).toContain("reconstruction of that exact design");
+    expect(message.attachments).toEqual([
+      expect.objectContaining({
+        type: "file",
+        displayName: "GPT-Image-2 architecture reference.png",
+      }),
+    ]);
   });
 
   it("includes connector validator feedback in HTML repair prompts", async () => {

@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react'
 import type {
   PresentationBrief,
   PresentationProject,
-  StorySection,
 } from '../types'
 
 export function useProject() {
@@ -38,42 +37,10 @@ export function useProject() {
     }
   }, [])
 
-  const saveApprovedStory = useCallback(async (
-    projectId: string,
-    context: string,
-    approvedSections: StorySection[],
-  ) => {
-    setIsSaving(true)
-    setError(null)
-    try {
-      const response = await fetch(`/projects/${projectId}/story`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ context, approvedSections }),
-      })
-      const payload = await response.json() as {
-        project?: PresentationProject
-        error?: string
-      }
-      if (!response.ok || !payload.project) {
-        throw new Error(payload.error || `Story storage failed (${response.status})`)
-      }
-      setProject(payload.project)
-      return payload.project
-    } catch (caught) {
-      const message = caught instanceof Error ? caught.message : 'Story storage failed'
-      setError(message)
-      throw caught
-    } finally {
-      setIsSaving(false)
-    }
-  }, [])
-
   return {
     project,
     isSaving,
     error,
     createPresentationProject,
-    saveApprovedStory,
   }
 }

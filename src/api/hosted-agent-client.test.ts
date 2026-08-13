@@ -23,6 +23,36 @@ describe("Hosted Agent client", () => {
     expect(isHostedAgentConfigured()).toBe(true);
   });
 
+  it("does not use a remote Hosted Agent during local development", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv(
+      "PRESENTATION_AGENT_INVOCATIONS_ENDPOINT",
+      "https://foundry.example/agents/presentation-agent/invocations",
+    );
+    expect(isHostedAgentConfigured()).toBe(false);
+  });
+
+  it("does not infer remote Hosted Agent use from NODE_ENV", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv(
+      "PRESENTATION_AGENT_INVOCATIONS_ENDPOINT",
+      "https://foundry.example/agents/presentation-agent/invocations",
+    );
+    expect(isHostedAgentConfigured()).toBe(false);
+  });
+
+  it("supports an explicit Hosted Agent override", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv(
+      "PRESENTATION_AGENT_INVOCATIONS_ENDPOINT",
+      "https://foundry.example/agents/presentation-agent/invocations",
+    );
+    vi.stubEnv("USE_HOSTED_AGENT", "true");
+    expect(isHostedAgentConfigured()).toBe(true);
+    vi.stubEnv("USE_HOSTED_AGENT", "false");
+    expect(isHostedAgentConfigured()).toBe(false);
+  });
+
   it("invokes a local agent without an authorization header", async () => {
     vi.stubEnv(
       "PRESENTATION_AGENT_INVOCATIONS_ENDPOINT",

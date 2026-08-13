@@ -6,7 +6,6 @@ import type {
   Slide,
   SlideGenerationResult,
 } from '../types'
-import { ArchitectureModeSwitcher } from './ArchitectureModeSwitcher'
 
 interface Props {
   architecture: ArchitectureGraph
@@ -31,6 +30,8 @@ function ArchitectureSlide({
   const activeVisualMode = visual?.mode === 'dual' ? architectureMode : visual?.mode
   const activeHtmlUrl = activeVisualMode === 'narrative-html'
     ? visual?.narrativeHtmlUrl
+    : activeVisualMode === 'image-html'
+      ? visual?.imageDerivedHtmlUrl
     : activeVisualMode === 'validated-json-html'
       ? visual?.validatedJsonHtmlUrl
       : visual?.htmlUrl
@@ -38,6 +39,7 @@ function ArchitectureSlide({
     (
       activeVisualMode === 'html' ||
       activeVisualMode === 'narrative-html' ||
+      activeVisualMode === 'image-html' ||
       activeVisualMode === 'validated-json-html'
     ) &&
     activeHtmlUrl
@@ -167,40 +169,28 @@ export function SlideWorkspace({
     <section className="slide-workspace" aria-labelledby="slide-workspace-title">
       <header className="slide-workspace-heading">
         <div>
-          <span className="eyebrow">Step 04 / Generate slides</span>
-          <h2 id="slide-workspace-title">Turn the approved story into a deck</h2>
+          <span className="eyebrow">Step 05 / Generate slides</span>
+          <h2 id="slide-workspace-title">Turn the approved outline into a deck</h2>
           <p>
-            The deck reuses the stored brief, approvals, and architecture. HTML is
-            generated as a versioned project asset and can be opened or downloaded.
+            The deck reuses the approved outline and architecture. Download the
+            HTML source or an editable PowerPoint generated from the same slide DOM.
           </p>
         </div>
         {result && <span className="asset-badge">Stored with lineage</span>}
       </header>
 
-      {visual?.mode === 'dual' && (
-        <div className="slide-visual-choice">
-          <div>
-            <strong>Choose the architecture design for slides</strong>
-            <small>All five were generated. The selected design is used by the deck.</small>
-          </div>
-          <ArchitectureModeSwitcher
-            selectedMode={architectureMode}
-            onSelectedModeChange={onArchitectureModeChange}
-          />
-        </div>
-      )}
-
       {!result ? (
         <div className="slide-generation-empty">
           <div className="deck-skeleton" aria-hidden="true">
             <span>Problem</span>
-            <span>User story</span>
+            <span>User scenarios</span>
+            <span>Solution</span>
             <span>Architecture</span>
           </div>
           <div>
             <strong>Ready to compose {architecture.title}</strong>
             <p>
-              Copilot will produce a title, problem, user-story, and architecture
+              Copilot will produce title, problem, user-scenarios, solution, and architecture
               slide without changing the approved technical design.
             </p>
             {error && <p className="slide-error" role="alert">{error}</p>}
@@ -210,7 +200,7 @@ export function SlideWorkspace({
               disabled={isGenerating}
               onClick={onGenerate}
             >
-              {isGenerating ? 'Generating five designs and slides...' : 'Generate slides + 5 designs'}
+              {isGenerating ? 'Generating slides...' : 'Generate slides'}
             </button>
           </div>
         </div>
@@ -237,6 +227,9 @@ export function SlideWorkspace({
                 </a>
                 <a href={result.downloadUrl} download>
                   Download HTML
+                </a>
+                <a href={result.pptxDownloadUrl} download>
+                  Download editable PPTX
                 </a>
               </div>
             </div>

@@ -67,6 +67,13 @@ const GRAPH = {
       description: "Hosts the presentation workspace.",
       technology: "Web runtime",
       componentNodeIds: ["web-workspace"],
+      toolings: [{
+        id: "brief-capture",
+        label: "Brief capture",
+        description: "Captures the presentation brief.",
+        technology: "React form",
+        componentNodeId: "web-workspace",
+      }],
       provenance: "confirmed",
     },
     {
@@ -75,6 +82,13 @@ const GRAPH = {
       description: "Hosts architecture generation.",
       technology: "GitHub Copilot SDK",
       componentNodeIds: ["copilot-agent"],
+      toolings: [{
+        id: "architecture-generation",
+        label: "Architecture generation",
+        description: "Generates validated architecture JSON.",
+        technology: "GitHub Copilot SDK",
+        componentNodeId: "copilot-agent",
+      }],
       provenance: "confirmed",
     },
   ],
@@ -88,6 +102,8 @@ const GRAPH = {
         label: "Submit brief",
         userAction: "Describe the desired architecture.",
         platformCalls: [{
+          platformId: "web-platform",
+          toolingId: "brief-capture",
           nodeId: "web-workspace",
           action: "capture brief",
           mechanism: "browser form",
@@ -100,6 +116,8 @@ const GRAPH = {
         label: "Generate graph",
         userAction: "Request the architecture result.",
         platformCalls: [{
+          platformId: "copilot-platform",
+          toolingId: "architecture-generation",
           nodeId: "copilot-agent",
           action: "generate validated graph",
           mechanism: "Copilot SDK",
@@ -170,6 +188,16 @@ describe("POST /architecture", () => {
     expect(response.status).toBe(200);
     expect(response.body.architecture.title).toBe("Presentation Agent Architecture");
     expect(response.body.architecture.layers).toHaveLength(2);
+    expect(response.body.architecture.platforms[0].toolings[0]).toMatchObject({
+      componentNodeId: "web-workspace",
+    });
+    expect(response.body.architecture.workflow.steps[0].platformCalls[0])
+      .toMatchObject({
+        platformId: "web-platform",
+        nodeId: "web-workspace",
+      });
+    expect(response.body.architecture.workflow.steps[0].platformCalls[0].toolingId)
+      .toBe("brief-capture");
     expect(createSessionMock).toHaveBeenCalledWith(
       expect.objectContaining({
         systemMessage: expect.objectContaining({ mode: "append" }),
@@ -256,6 +284,25 @@ describe("POST /architecture", () => {
       ...GRAPH,
       platforms: [GRAPH.platforms[0]],
     })).toThrow("Every non-actor component must belong to one platform");
+  });
+
+  it("requires explicit platform toolings and workflow tooling calls", () => {
+    expect(() => validateArchitectureGraph({
+      ...GRAPH,
+      platforms: GRAPH.platforms.map(({ toolings: _toolings, ...platform }) => platform),
+    })).toThrow("requires 1-6 important toolings");
+    expect(() => validateArchitectureGraph({
+      ...GRAPH,
+      workflow: {
+        ...GRAPH.workflow,
+        steps: GRAPH.workflow.steps.map(step => ({
+          ...step,
+          platformCalls: step.platformCalls.map(
+            ({ toolingId: _toolingId, ...call }) => call,
+          ),
+        })),
+      },
+    })).toThrow("must reference a real platform, tooling, and component");
   });
 
   it("limits the user workflow to seven consolidated steps", () => {

@@ -7,15 +7,18 @@ import {
 } from "../presentation-instructions.js";
 import type { ArchitectureGraph } from "./architecture.js";
 import type { ArchitectureVisualLayout } from "../architecture-visual.js";
+import { applyArchitectureImageLayoutGuard } from "../architecture-html-layout.js";
 import {
   currentSourceAssetIds,
   getProject,
   isProjectId,
   readProjectBinaryAsset,
   readProjectAsset,
+  storeProjectBinaryAsset,
   storeProjectJsonAsset,
   storeProjectTextAsset,
 } from "./project-store.js";
+import { exportHtmlToEditablePptx } from "./pptx-export.js";
 import {
   invokeHostedStructured,
   isHostedAgentConfigured,
@@ -23,11 +26,13 @@ import {
 import { repositoryPromptContext } from "./repository-context.js";
 
 const router = Router();
+const pptxExports = new Map<string, Promise<Uint8Array>>();
 
 export type SlideKind =
   | "title"
   | "problem"
-  | "user-story"
+  | "user-scenarios"
+  | "solution"
   | "architecture"
   | "summary";
 
@@ -58,7 +63,8 @@ interface SlideSession {
 const SLIDE_KINDS = new Set([
   "title",
   "problem",
-  "user-story",
+  "user-scenarios",
+  "solution",
   "architecture",
   "summary",
 ]);
@@ -87,9 +93,9 @@ export function validateSlideDeck(value: unknown): SlideDeck {
   }
   const source = value as Record<string, unknown>;
   if (!Array.isArray(source.slides) ||
-      source.slides.length < 4 ||
+      source.slides.length < 5 ||
       source.slides.length > 8) {
-    throw new Error("Slide deck must contain between 4 and 8 slides.");
+    throw new Error("Slide deck must contain between 5 and 8 slides.");
   }
   const ids = new Set<string>();
   const slides = source.slides.map((rawSlide, index) => {
@@ -119,7 +125,7 @@ export function validateSlideDeck(value: unknown): SlideDeck {
     };
   });
   const kinds = new Set(slides.map(slide => slide.kind));
-  for (const required of ["title", "problem", "user-story", "architecture"]) {
+  for (const required of ["title", "problem", "user-scenarios", "solution", "architecture"]) {
     if (!kinds.has(required as SlideKind)) {
       throw new Error(`Slide deck is missing the required ${required} slide.`);
     }
@@ -216,6 +222,25 @@ function renderArchitectureSvg(
   </svg>`;
 }
 
+function renderArchitectureHtmlFragment(document: string): string {
+  const styles = [...document.matchAll(
+    /<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi,
+  )].map(match => match[1]).join("\n");
+  const body = document.match(/<body\b[^>]*>([\s\S]*?)<\/body\s*>/i)?.[1] ??
+    document
+      .replace(/<!doctype[^>]*>/gi, "")
+      .replace(/<\/?(?:html|head|body)\b[^>]*>/gi, "")
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "");
+  const scopedStyles = styles
+    .replace(/:root/g, ":scope")
+    .replace(/\bhtml\b(?=\s*[,>{.#:[\]])/g, ":scope")
+    .replace(/\bbody\b(?=\s*[,>{.#:[\]])/g, ":scope");
+  return `<div class="architecture-html-embed" data-architecture-html style="width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;overflow:hidden!important;contain:layout paint">
+    <style>@scope (.architecture-html-embed){${scopedStyles}}</style>
+    ${body}
+  </div>`;
+}
+
 export function renderSlideDeckHtml(
   deck: SlideDeck,
   architecture: ArchitectureGraph,
@@ -226,16 +251,21 @@ export function renderSlideDeckHtml(
   },
 ): string {
   const slides = deck.slides.map((slide, index) => {
+    const usesFullCanvasArchitecture =
+      slide.kind === "architecture" &&
+      Boolean(visual?.htmlDocument || visual?.imageDataUrl);
     const content = slide.kind === "architecture"
       ? visual?.htmlDocument
-        ? `<iframe class="architecture-html-frame" sandbox="" srcdoc="${escapeHtml(visual.htmlDocument)}" title="${escapeHtml(architecture.title)} architecture diagram"></iframe>`
+        ? renderArchitectureHtmlFragment(visual.htmlDocument)
         : visual?.layout
         ? renderArchitectureSvg(architecture, visual.layout)
         : visual?.imageDataUrl
           ? `<div class="architecture-image"><img src="${escapeHtml(visual.imageDataUrl)}" alt="${escapeHtml(architecture.title)} architecture diagram"></div>`
           : renderArchitecture(architecture)
       : `<ul>${slide.bullets.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
-    return `<section class="slide slide-${escapeHtml(slide.kind)}">
+    return `<section class="slide slide-${escapeHtml(slide.kind)}${
+      usesFullCanvasArchitecture ? " slide-architecture-canvas" : ""
+    }">
       <div class="slide-number">${String(index + 1).padStart(2, "0")}</div>
       <div class="eyebrow">${escapeHtml(slide.eyebrow)}</div>
       <h2>${escapeHtml(slide.title)}</h2>
@@ -267,7 +297,12 @@ export function renderSlideDeckHtml(
     .architecture article>div{display:grid;gap:8px}.architecture span{padding:10px;background:rgba(12,20,34,.7);border-radius:9px}.architecture span.assumed,.architecture-flows span.assumed{border:1px dashed #dca85f}.architecture b,.architecture em,.architecture small{display:block}.architecture em{margin-top:4px;color:var(--blue);font:600 .55rem/1.2 ui-monospace,monospace;font-style:normal}.architecture small{margin-top:4px;color:var(--muted);font-size:.62rem;line-height:1.35}
     .architecture-flows{margin-top:10px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.architecture-flows span{padding:9px 11px;background:rgba(62,110,193,.17);border:1px solid rgba(121,167,255,.22);border-radius:9px}    .architecture-flows b,.architecture-flows em,.architecture-flows small{display:block}.architecture-flows b{font-size:.62rem}.architecture-flows em{margin-top:3px;color:var(--blue);font-size:.55rem;font-style:normal}.architecture-flows small{margin-top:3px;color:var(--muted);font-size:.54rem}
     .architecture-image{margin-top:24px;display:grid;place-items:center}.architecture-image img{display:block;max-width:100%;max-height:58vh;object-fit:contain;border-radius:14px;box-shadow:0 18px 42px rgba(0,0,0,.28)}
-    .architecture-html-frame{display:block;width:100%;height:58vh;margin-top:20px;border:0;border-radius:14px;background:#fff}
+    .architecture-html-embed{display:block;width:100%;height:58vh;margin-top:20px;overflow:auto;border:0;border-radius:14px;background:#fff;color:#0f274d}
+    .slide-architecture-canvas{display:block;padding:0;background:#fff}
+    .slide-architecture-canvas>.slide-number,.slide-architecture-canvas>.eyebrow,.slide-architecture-canvas>h2,.slide-architecture-canvas>.subtitle{display:none}
+    .slide-architecture-canvas .architecture-html-embed{width:100vw!important;height:100vh!important;max-width:100vw!important;max-height:100vh!important;margin:0;border-radius:0;overflow:hidden!important;contain:layout paint}
+    .slide-architecture-canvas .architecture-image{width:100vw;height:100vh;margin:0}
+    .slide-architecture-canvas .architecture-image img{width:100%;height:100%;max-width:none;max-height:none;object-fit:contain;border-radius:0;box-shadow:none}
     .architecture-generated-svg{display:block;width:100%;max-height:58vh;margin-top:22px;background:#f7f9fc;border-radius:14px}.visual-node rect{fill:#fff;stroke:#b9c8dc;stroke-width:2}.visual-node.assumed rect{stroke-dasharray:8 6}.visual-kind{fill:#3976e8;font:700 17px ui-monospace,monospace;text-transform:uppercase}.visual-label{fill:#253149;font:700 27px Inter,Segoe UI,sans-serif}.visual-tech{fill:#687991;font:600 16px ui-monospace,monospace}.visual-connection{color:#3976e8}.visual-connection polyline{fill:none;stroke:currentColor;stroke-width:5;stroke-linecap:round;stroke-linejoin:round}.visual-connection text{fill:#425671;paint-order:stroke;stroke:#fff;stroke-width:9px;font:700 17px ui-monospace,monospace;text-anchor:middle}.visual-connection marker path{fill:context-stroke}
     @media(max-width:760px){.slide{padding:70px 24px}.slide-number{font-size:4rem}.architecture{grid-template-columns:1fr 1fr}.architecture-flows{grid-template-columns:1fr}ul{grid-template-columns:1fr}}
     @media print{body{background:#fff}.slide{width:13.333in;min-height:7.5in;page-break-after:always}}
@@ -292,10 +327,11 @@ router.post("/slides", async (req, res) => {
     architectureVisualMode !== "image" &&
     architectureVisualMode !== "narrative-image" &&
     architectureVisualMode !== "narrative-html" &&
-    architectureVisualMode !== "validated-json-html"
+    architectureVisualMode !== "validated-json-html" &&
+    architectureVisualMode !== "image-html"
   ) {
     res.status(400).json({
-      error: "architectureVisualMode must name one of the five architecture visuals.",
+      error: "architectureVisualMode must name one of the six architecture visuals.",
     });
     return;
   }
@@ -304,33 +340,26 @@ router.post("/slides", async (req, res) => {
     res.status(404).json({ error: "Presentation project not found." });
     return;
   }
-  const storyAssetId = project.currentAssets.story;
+  const outlineAssetId = project.currentAssets.outline;
   const architectureAssetId = project.currentAssets.architecture;
-  if (!storyAssetId || !architectureAssetId) {
+  if (!outlineAssetId || !architectureAssetId) {
     res.status(409).json({
-      error: "Approved story and architecture assets are required before generating slides.",
+      error: "Approved outline and architecture assets are required before generating slides.",
     });
     return;
   }
-  const [storyAsset, architectureAsset] = await Promise.all([
-    readProjectAsset(project.id, storyAssetId),
+  const [outlineAsset, architectureAsset] = await Promise.all([
+    readProjectAsset(project.id, outlineAssetId),
     readProjectAsset(project.id, architectureAssetId),
   ]);
-  if (!storyAsset || !architectureAsset) {
+  if (!outlineAsset || !architectureAsset) {
     res.status(409).json({ error: "Required project assets could not be resolved." });
     return;
   }
-  const story = JSON.parse(storyAsset.content) as {
-    approvedSections?: unknown;
-  };
-  const approvedSections = Array.isArray(story.approvedSections)
-    ? new Set(story.approvedSections)
-    : new Set();
-  if (!["problem", "userStory", "architecture"].every(
-    section => approvedSections.has(section),
-  )) {
+  const outline = JSON.parse(outlineAsset.content) as { status?: unknown };
+  if (outline.status !== "approved") {
     res.status(409).json({
-      error: "All three story sections must be approved before generating slides.",
+      error: "The current outline must be approved before generating slides.",
     });
     return;
   }
@@ -343,7 +372,7 @@ router.post("/slides", async (req, res) => {
     if (isHostedAgentConfigured()) {
       content = await invokeHostedStructured("slides", {
         brief: project.brief,
-        story,
+        outline,
         architecture,
         repositoryEvidence: repositoryEvidence || undefined,
       });
@@ -361,8 +390,8 @@ router.post("/slides", async (req, res) => {
         SLIDE_DECK_PROMPT,
         "PROJECT BRIEF",
         JSON.stringify(project.brief),
-        "APPROVED STORY",
-        storyAsset.content,
+        "APPROVED OUTLINE",
+        outlineAsset.content,
         "APPROVED ARCHITECTURE",
         architectureAsset.content,
         repositoryEvidence
@@ -379,7 +408,7 @@ router.post("/slides", async (req, res) => {
       deck,
       currentSourceAssetIds(project, [
         "repository-evidence",
-        "story",
+        "outline",
         "architecture",
       ]),
       { title: deck.title, slideCount: deck.slides.length },
@@ -389,6 +418,8 @@ router.post("/slides", async (req, res) => {
     const htmlAssetId = project.currentAssets["architecture-html"];
     const validatedJsonHtmlAssetId =
       project.currentAssets["architecture-validated-json-html"];
+    const imageDerivedHtmlAssetId =
+      project.currentAssets["architecture-image-derived-html"];
     const narrativeImageAssetId = project.currentAssets["architecture-narrative-image"];
     const narrativeHtmlAssetId = project.currentAssets["architecture-narrative-html"];
     const [
@@ -396,6 +427,7 @@ router.post("/slides", async (req, res) => {
       imageAsset,
       htmlArchitectureAsset,
       validatedJsonHtmlAsset,
+      imageDerivedHtmlAsset,
       narrativeImageAsset,
       narrativeHtmlAsset,
     ] = await Promise.all([
@@ -404,6 +436,9 @@ router.post("/slides", async (req, res) => {
       htmlAssetId ? readProjectAsset(project.id, htmlAssetId) : null,
       validatedJsonHtmlAssetId
         ? readProjectAsset(project.id, validatedJsonHtmlAssetId)
+        : null,
+      imageDerivedHtmlAssetId
+        ? readProjectAsset(project.id, imageDerivedHtmlAssetId)
         : null,
       narrativeImageAssetId
         ? readProjectBinaryAsset(project.id, narrativeImageAssetId)
@@ -422,6 +457,11 @@ router.post("/slides", async (req, res) => {
         ? { htmlDocument: narrativeHtmlAsset.content }
       : selectedVisualMode === "validated-json-html" && validatedJsonHtmlAsset
         ? { htmlDocument: validatedJsonHtmlAsset.content }
+      : selectedVisualMode === "image-html" && imageDerivedHtmlAsset
+        ? {
+            htmlDocument:
+              applyArchitectureImageLayoutGuard(imageDerivedHtmlAsset.content),
+          }
       : selectedVisualMode === "image" && imageAsset
       ? { imageDataUrl: `data:image/png;base64,${Buffer.from(imageAsset.content).toString("base64")}` }
       : selectedVisualMode === "html" && htmlArchitectureAsset
@@ -436,12 +476,13 @@ router.post("/slides", async (req, res) => {
     const html = renderSlideDeckHtml(deck, architecture, visual);
     const slideSources = [
       modelStored.asset.id,
-      storyAssetId,
+      outlineAssetId,
       architectureAssetId,
       layoutAssetId,
       imageAssetId,
       htmlAssetId,
       validatedJsonHtmlAssetId,
+      imageDerivedHtmlAssetId,
       narrativeImageAssetId,
       narrativeHtmlAssetId,
     ].filter((id): id is string => Boolean(id));
@@ -461,6 +502,7 @@ router.post("/slides", async (req, res) => {
       },
       previewUrl: `/projects/${project.id}/slides/preview`,
       downloadUrl: `/projects/${project.id}/slides/download`,
+      pptxDownloadUrl: `/projects/${project.id}/slides/download.pptx`,
     });
   } catch (error) {
     const enhanced = enhanceModelError(error);
@@ -496,6 +538,74 @@ router.get("/projects/:projectId/slides/preview", async (req, res) => {
 
 router.get("/projects/:projectId/slides/download", async (req, res) => {
   await sendStoredDeck(req.params.projectId, "attachment", res);
+});
+
+async function getOrCreatePptx(projectId: string): Promise<Uint8Array | null> {
+  const project = await getProject(projectId);
+  const htmlAssetId = project?.currentAssets["slide-deck"];
+  if (!project || !htmlAssetId) return null;
+  const currentPptxId = project.currentAssets["slide-deck-pptx"];
+  const currentPptx = currentPptxId
+    ? await readProjectBinaryAsset(projectId, currentPptxId)
+    : null;
+  if (currentPptx?.asset.sourceAssetIds.includes(htmlAssetId)) {
+    return currentPptx.content;
+  }
+
+  const activeExport = pptxExports.get(projectId);
+  if (activeExport) return activeExport;
+  const exportPromise = (async () => {
+    const htmlAsset = await readProjectAsset(projectId, htmlAssetId);
+    if (!htmlAsset) {
+      throw new Error("Generated slide deck not found.");
+    }
+    const pptx = await exportHtmlToEditablePptx(
+      htmlAsset.content,
+      String(htmlAsset.asset.metadata.title || project.brief.title),
+    );
+    await storeProjectBinaryAsset(
+      projectId,
+      "slide-deck-pptx",
+      "pptx",
+      pptx,
+      [htmlAsset.asset.id],
+      {
+        title: String(htmlAsset.asset.metadata.title || project.brief.title),
+        slideCount: Number(htmlAsset.asset.metadata.slideCount || 0),
+        editable: true,
+      },
+    );
+    return new Uint8Array(pptx);
+  })();
+  pptxExports.set(projectId, exportPromise);
+  try {
+    return await exportPromise;
+  } finally {
+    pptxExports.delete(projectId);
+  }
+}
+
+router.get("/projects/:projectId/slides/download.pptx", async (req, res) => {
+  try {
+    const pptx = await getOrCreatePptx(req.params.projectId);
+    if (!pptx) {
+      res.status(404).json({ error: "Generated slide deck not found." });
+      return;
+    }
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      'attachment; filename="presentation-slides-editable.pptx"',
+    );
+    res.send(Buffer.from(pptx));
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 });
 
 export default router;

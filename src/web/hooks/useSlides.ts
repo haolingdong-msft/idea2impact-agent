@@ -16,6 +16,7 @@ export function useSlides() {
       const response = await fetch('/slides', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(360_000),
         body: JSON.stringify({ projectId, architectureVisualMode }),
       })
       const responseBody = await response.text()

@@ -1,11 +1,7 @@
 import type { ArchitectureVisualMode } from '../types'
 
 const OPTIONS: Array<{ mode: ArchitectureVisualMode; label: string }> = [
-  { mode: 'html', label: 'Full context → HTML/CSS' },
-  { mode: 'image', label: 'Validated JSON → image' },
-  { mode: 'validated-json-html', label: 'Validated JSON → Copilot HTML/CSS' },
-  { mode: 'narrative-image', label: 'Agent narrative → image' },
-  { mode: 'narrative-html', label: 'Agent narrative → HTML/CSS' },
+  { mode: 'image', label: 'Validated JSON → GPT-Image-2' },
 ]
 
 interface Props {

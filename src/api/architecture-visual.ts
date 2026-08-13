@@ -24,14 +24,25 @@ export type ArchitectureVisualLayout = {
 };
 
 export type ArchitectureVisual = {
-  mode: "dual" | "html" | "image" | "legacy";
+  mode:
+    | "dual"
+    | "html"
+    | "image"
+    | "narrative-image"
+    | "narrative-html"
+    | "validated-json-html"
+    | "image-html"
+    | "legacy";
   imageUrl?: string;
+  pptxDownloadUrl?: string;
   narrativeImageUrl?: string;
   htmlUrl?: string;
   validatedJsonHtmlUrl?: string;
+  imageDerivedHtmlUrl?: string;
   narrativeHtmlUrl?: string;
   layout?: ArchitectureVisualLayout;
   fallbackReason?: string;
+  failures?: Array<{ mode: string; error: string }>;
 };
 
 type Credential = {
@@ -68,6 +79,18 @@ function configuredValue(name: string): string {
   return process.env[name]?.trim() || "";
 }
 
+async function modelHeaders(): Promise<Record<string, string>> {
+  const localApiKey = process.env.NODE_ENV !== "production"
+    ? configuredValue("ARCHITECTURE_MODEL_API_KEY")
+    : "";
+  return {
+    ...(localApiKey
+      ? { "api-key": localApiKey }
+      : { Authorization: await authorizationHeader() }),
+    "Content-Type": "application/json",
+  };
+}
+
 export function isArchitectureVisualConfigured(): boolean {
   return Boolean(
     configuredValue("ARCHITECTURE_MODEL_ENDPOINT") &&
@@ -83,6 +106,20 @@ export function isArchitectureImageConfigured(): boolean {
   );
 }
 
+export function architectureImageConfiguration(): {
+  deployment: string;
+  width: number;
+  height: number;
+} {
+  const deployment = configuredValue("ARCHITECTURE_IMAGE_DEPLOYMENT");
+  const isGptImage2 = deployment.toLowerCase().includes("gpt-image-2");
+  return {
+    deployment,
+    width: 1536,
+    height: isGptImage2 ? 864 : 1024,
+  };
+}
+
 function deploymentUrl(deployment: string, operation: string, apiVersion: string): string {
   const endpoint = configuredValue("ARCHITECTURE_MODEL_ENDPOINT").replace(/\/$/, "");
   return `${endpoint}/openai/deployments/${encodeURIComponent(deployment)}/${operation}?api-version=${encodeURIComponent(apiVersion)}`;
@@ -93,28 +130,39 @@ async function modelFetch(
   body: unknown,
   timeout: number,
 ): Promise<Response> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: await authorizationHeader(),
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeout),
-  });
-  if (!response.ok) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: await modelHeaders(),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeout),
+    });
+    if (response.ok) {
+      return response;
+    }
     const detail = (await response.text()).slice(0, 800);
+    const deploymentNotFound =
+      response.status === 404 && /DeploymentNotFound/i.test(detail);
+    if (deploymentNotFound && attempt < 3) {
+      await new Promise(resolve => setTimeout(resolve, attempt * 750));
+      continue;
+    }
     if (response.status === 401 || response.status === 403) {
       throw new Error(
         `Architecture model access failed (${response.status}). Grant the API managed identity ` +
         `Cognitive Services OpenAI User on the model resource. ${detail}`,
       );
     }
+    const target = new URL(url);
+    const deployment = decodeURIComponent(
+      target.pathname.match(/\/deployments\/([^/]+)/)?.[1] || "unknown",
+    );
     throw new Error(
-      `Architecture model request failed (${response.status}): ${detail || response.statusText}`,
+      `Architecture model request failed (${response.status}) for deployment ` +
+      `"${deployment}" on "${target.host}": ${detail || response.statusText}`,
     );
   }
-  return response;
+  throw new Error("Architecture model request failed after retrying.");
 }
 
 function imagePrompt(
@@ -193,16 +241,17 @@ export async function generateArchitectureImage(
   inputKind: "validated-architecture" | "agent-summary" =
     "validated-architecture",
 ): Promise<Uint8Array> {
+  const { deployment, width, height } = architectureImageConfiguration();
   const response = await modelFetch(
     deploymentUrl(
-      configuredValue("ARCHITECTURE_IMAGE_DEPLOYMENT"),
+      deployment,
       "images/generations",
       configuredValue("ARCHITECTURE_IMAGE_API_VERSION") || "2025-04-01-preview",
     ),
     {
       prompt: imagePrompt(evidenceBrief, inputKind),
       n: 1,
-      size: "1536x1024",
+      size: `${width}x${height}`,
       quality: "high",
       output_format: "png",
     },

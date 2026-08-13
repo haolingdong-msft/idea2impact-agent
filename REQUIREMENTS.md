@@ -4,9 +4,9 @@
 
 The **Presentation Agent** is a web application powered by the **GitHub Copilot
 SDK** that helps users produce high-quality technical presentation assets
-end-to-end. It turns an idea into a structured story and architecture graph, then
-turns the approved story into presentation slides, then turns a user-recorded
-demo into a refined, personally narrated video. Every step contributes versioned
+end-to-end. It turns an idea into an editable three-part outline and architecture
+graph, turns one approved outline into presentation slides and slide-grounded
+speaker notes, then turns an uploaded recording into a refined video. Every step contributes versioned
 assets to one orchestrated presentation project. Azure AI Foundry provides
 optional speech and video models rather than the primary agent runtime.
 
@@ -31,7 +31,7 @@ reworking the core agent.
   authoring tools.
 - Create a clear, responsive HTML architecture graph from a user brief and
   supporting content.
-- Generate a reviewable slide deck from the approved story and architecture,
+- Generate a reviewable slide deck from the approved outline and architecture,
   with HTML as the required format and `.pptx` as an optional export.
 - Improve recordings by speeding up hanging or inactive parts and enhancing
   visual clarity.
@@ -66,18 +66,28 @@ reworking the core agent.
 
 **Description:** Create a well-structured, professional architecture graph from a
 user brief and optional source documents. The agent uses three inputs:
-**Problem Statement**, **User Story**, and **Architecture**. It must work
-conversationally with the user to clarify and obtain approval for each part before
-producing the final graph and slide deck.
+**Problem Statement**, **User Scenarios**, and **Solution**. It works
+conversationally with the user to refine all three parts, displays one editable
+outline summary, and requires one combined approval before generation.
 
 **Requirements:**
 - FR-1.1: Accept a natural-language brief containing the topic, audience, purpose,
   and desired outcome.
 - FR-1.1a: Require only the natural-language idea. Title, audience, purpose, and
   GitHub repository URL are optional and must not block project creation.
+- FR-1.1aa: When no repository is supplied, immediately generate initial Problem
+  Statement, User Scenarios, and Solution content from the user's idea, optional
+  audience, and optional purpose. Do not require a clarification answer before
+  showing all three fields; subsequent chat refines the generated draft.
 - FR-1.1b: When a GitHub repository URL is supplied, scan a bounded,
   architecture-focused set of code and documentation at a pinned commit and use
   the resulting cited evidence to ground the story, graph, and slides.
+- FR-1.1e: After a repository scan, automatically summarize the codebase into the
+  initial Problem Statement, User Scenarios, and Solution fields. The user does
+  not need to separately describe those fields before the first outline appears.
+- FR-1.1f: Derive technical behavior and workflows from repository evidence, but
+  label product intent, business impact, or target-user claims that the codebase
+  cannot prove as assumptions.
 - FR-1.1c: Support public repositories without login and private repositories
   through a least-privilege GitHub App installed on repositories selected by the
   current user.
@@ -88,16 +98,23 @@ producing the final graph and slide deck.
 - FR-1.3: Conduct a guided conversation to clarify the **Problem Statement**,
   including the current situation, target users, pain points, impact, evidence,
   scope, and desired outcome.
-- FR-1.4: Conduct a guided conversation to clarify the **User Story**, including
-  the primary persona, user goal, user journey, expected value, success criteria,
-  and important edge cases.
-- FR-1.5: Conduct a guided conversation to clarify the **Architecture**, including
-  system boundaries, actors, components, integrations, data flow, deployment
-  environment, security constraints, and non-functional requirements.
-- FR-1.6: Summarize assumptions and unresolved questions after each clarification
-  stage, and obtain user approval before treating that part as final.
-- FR-1.7: Propose a concise narrative summary connecting the Problem Statement,
-  User Story, and Architecture before generating the graph.
+- FR-1.4: Conduct a guided conversation to clarify **User Scenarios**, including
+  primary actors, workflows, expected value, success criteria, and important edge
+  cases.
+- FR-1.5: Conduct a guided conversation to clarify the **Solution**, including
+  experience, capabilities, system boundaries, components, integrations, data flow,
+  deployment environment, security constraints, and non-functional requirements.
+- FR-1.6: Do not require approval after individual sections. Keep all three sections
+  synchronized in one structured outline throughout the conversation.
+- FR-1.7: Present the complete outline prominently in the center of the workspace.
+  The user can edit it directly or update it through the agent.
+- FR-1.7a: Autosave direct edits as versioned draft outline assets.
+- FR-1.7b: Provide one combined approval action. Approval creates an immutable
+  approved outline revision used by all downstream generation.
+- FR-1.7c: Provide a repository-only **Quick test: generate slides** shortcut for
+  manual smoke testing. Its click explicitly authorizes the application to scan
+  the repository, generate and lock the initial outline revision, and continue
+  directly through architecture and slide generation.
 - FR-1.8: Generate a graph title, one-sentence summary, architecture layers,
   components, and labeled connections appropriate for the intended audience.
 - FR-1.8a: Describe each technical component with its runtime or implementation
@@ -105,6 +122,19 @@ producing the final graph and slide deck.
   inferred.
 - FR-1.8b: Describe each component relationship with direction, interaction type,
   protocol or mechanism, and the command, event, or data exchanged.
+- FR-1.8c: For every runtime platform, list only the important toolings or
+  capabilities hosted or used there (for example GitHub file read, Foundry Hosted
+  Agent, agent trace, and agent trace annotation).
+- FR-1.8d: Every user-workflow platform call must reference the exact platform,
+  tooling, and component it invokes, making the step-to-tooling mapping explicit.
+- FR-1.8e: The architecture JSON must use top-level `workflow`, `platforms`,
+  `layers`, and `connections`. Each platform must contain `componentNodeIds` and
+  1-6 important `toolings`; each tooling must identify its owning component.
+  Each workflow step must contain 1-2 `platformCalls`, and every call must provide
+  explicit `platformId`, `toolingId`, `nodeId`, `action`, `mechanism`, and
+  `output` values that resolve to the declared platform, tooling, and component.
+- FR-1.8f: Expose and generate only the Validated JSON → GPT-Image-2
+  architecture visual. Do not run an intermediate image-to-HTML conversion.
 - FR-1.9: Organize the graph into 3-5 readable layers with a clear primary
   left-to-right flow.
 - FR-1.10: Produce consistent typography, color, spacing, hierarchy, and component
@@ -150,15 +180,16 @@ producing the final graph and slide deck.
 
 #### 4.1.2 Slide Generation Workflow
 
-- FR-1.22: Generate slides only after the Problem Statement, User Story, and
-  Architecture have been explicitly approved.
+- FR-1.22: Generate architecture visuals and slides only after the complete outline
+  has been explicitly approved once.
 - FR-1.23: Generate a coherent deck containing at minimum a title/overview slide,
-  Problem Statement slide, User Story slide, and Architecture slide.
-- FR-1.24: Use the approved story and stored architecture specification as the
+  Problem Statement slide, User Scenarios slide, Solution slide, and Architecture slide.
+- FR-1.24: Use the approved outline and stored architecture specification as the
   source of truth; slide generation must not silently introduce new claims,
   components, or integrations.
-- FR-1.25: Embed the architecture as a large, readable HTML composition in the
-  Architecture slide rather than converting it into editable PowerPoint shapes.
+- FR-1.25: Convert the generated GPT-Image-2 architecture PNG directly into
+  object-level editable PowerPoint content with the image-to-editable-ppt workflow.
+  Do not use an intermediate HTML reconstruction or a full-slide screenshot.
 - FR-1.25a: Preserve component technologies, relationship details, and assumption
   markers in the generated architecture slide.
 - FR-1.26: Render the deck in a presentation-ready 16:9 HTML format with
@@ -166,18 +197,24 @@ producing the final graph and slide deck.
 - FR-1.27: Let the user preview every slide, navigate between slides, and request
   targeted revisions.
 - FR-1.28: Store both the structured slide-deck JSON and generated HTML as project
-  assets with lineage back to the approved story and architecture asset.
-- FR-1.29: Support downloading or opening the generated HTML deck. A `.pptx`
-  export may also be provided, but HTML alone satisfies the initial release.
+  assets with lineage back to the approved outline and architecture asset.
+- FR-1.29: Provide one download action for the object-level editable `.pptx`
+  generated directly from the approved architecture image.
 - FR-1.30: Preserve approved architecture and unaffected slide content when
   regenerating or revising a selected slide.
+- FR-1.31: Generate one editable speaker-note segment for every generated slide.
+- FR-1.32: Speaker notes must use exact slide IDs and titles, remain grounded in
+  the approved outline and deck, and be stored as a versioned speech-script asset.
+- FR-1.33: The initial release generates text speaker notes only; speech synthesis
+  and personal-voice audio remain a future capability.
 
 **Inputs:** user brief, optional source files, optional existing architecture
 specification, and optional brand theme.
 
-**Outputs:** approved content brief for the three inputs, structured architecture
-JSON, responsive HTML/CSS architecture graph, structured slide-deck JSON, and a
-downloadable HTML slide deck (with optional `.pptx` export).
+**Outputs:** approved three-part outline, structured architecture
+JSON, a GPT-Image-2 architecture PNG, structured slide-deck JSON, and a
+downloadable object-level editable `.pptx`, plus editable
+slide-grounded speaker notes.
 
 **Candidate implementation:** GitHub Copilot SDK for guided clarification and
 structured graph generation; React and TypeScript for the web UI; semantic HTML
@@ -318,8 +355,8 @@ outputs are durable, versioned assets that later steps can consume without askin
 the user to re-upload or restate approved information.
 
 - FR-4.1: Create a unique project when the user submits the initial idea.
-- FR-4.2: Persist the brief, approved story context, architecture JSON, slide-deck
-  JSON/HTML, source recording, refined recording, transcript, script revisions,
+- FR-4.2: Persist the brief, outline drafts and approved outline, architecture JSON,
+  slide-deck JSON/HTML, speaker notes, source recording, refined recording, transcript, script revisions,
   voice-asset references, narration segments, previews, and exports under that
   project.
 - FR-4.3: Give every asset a stable ID, type, format, creation time, revision, and
@@ -353,7 +390,7 @@ the user to re-upload or restate approved information.
   not appear as a literal in source, deployment manifests, image layers, or logs.
 - FR-4.16: When the Hosted Agent uses GitHub Copilot models, configure an explicit
   GPT-family model rather than relying on the SDK default. The initial hosted
-  deployment uses `gpt-5-mini`.
+  deployment uses `gpt-5.6-sol`.
 - FR-4.17: Give each project an authenticated or signed-session owner and
   authorize all project, asset, upload, download, repository, and generation
   operations against that owner.
@@ -368,53 +405,50 @@ the user to re-upload or restate approved information.
 
 The canonical workflow is:
 
-**Describe idea → Structure story → Generate HTML architecture → Generate slides
-(HTML required; `.pptx` optional) → Upload recording video → Polish video →
-Generate speech script → Synthesize narration with stored user voice assets**
+**Describe idea → Refine outline → Review/edit outline summary → Approve outline →
+Generate slides → Generate speaker notes → Upload recording → Refine recording**
 
 The Presentation Agent orchestrates these steps through a shared project manifest
 and asset store so every approved output becomes the input to the next step.
 
 1. **Describe idea:** The user describes the idea, audience, purpose, and optional
    source material.
-2. **Structure story:** The agent clarifies and structures the Problem Statement,
-   User Story, and Architecture, then obtains approval for the narrative.
-3. **Generate HTML architecture:** The agent creates a structured architecture
-   model and renders it as a responsive HTML/CSS graph for user review.
-4. **Generate slides:** The agent generates and stores a presentation-ready HTML
-   deck grounded in the approved story and architecture. The user previews the
+2. **Refine outline:** The agent uses focused Q&A to refine Problem Statement,
+   User Scenarios, and Solution without intermediate approvals.
+3. **Review/edit outline summary:** The application highlights the structured
+   outline in the center; direct edits autosave and chat updates the same model.
+4. **Approve outline:** The user approves all three sections once.
+5. **Generate slides:** The agent generates the architecture options and stores a presentation-ready HTML
+   deck grounded in the approved outline and architecture. The user previews the
    deck and may download HTML or an optional `.pptx`.
-5. **Upload recording video:** The user records the demo and uploads the untouched
+6. **Generate speech:** The agent creates editable speaker notes for each slide.
+7. **Upload recording:** The user uploads the untouched
    source video into the same presentation project.
-6. **Polish video:** The agent inspects the source, accelerates approved inactive
+8. **Refine recording:** The agent inspects the stored source, accelerates inactive
    ranges, improves perceived clarity, preserves A/V synchronization, and renders
    a separate refined video asset.
-7. **Generate speech script:** The agent transcribes the recording, aligns it with
-   the approved slides and refined timeline, proposes an editable script, and
-   requires explicit script approval.
-8. **Synthesize narration with stored user voice assets:** After consent and
-   ownership checks, the agent resolves the authorized stored voice profile,
-   generates segmented narration, synchronizes it with the refined video, and
-   stores preview and export assets.
 
 ## 6. Initial Release Acceptance Criteria
 
-- AC-1: Given an initial brief, the agent clarifies and obtains approval for the
-  Problem Statement, User Story, and Architecture before generating the final
-  graph.
+- AC-1: Given an initial brief, the agent conversationally refines Problem Statement,
+  User Scenarios, and Solution without section approvals.
+- AC-1b: Given only an idea and no codebase, the first outline already contains all
+  three fields; the user can then refine them through chat or direct editing.
+- AC-1a: Given a repository URL, the first outline contains all three fields
+  summarized from bounded repository evidence and clearly marks unproven intent.
 - AC-2: Given an approved architecture specification, the agent generates a
   professionally designed HTML/CSS architecture graph and supports revision
   without changing the agreed technical meaning.
-- AC-3: Given the approved three-part content and optional source material, the
+- AC-3: Given the single approved outline and optional source material, the
   agent returns validated graph JSON and renders readable layers, components, and
   labeled flows responsively in the browser.
-- AC-4: Given an approved story and architecture, the agent generates a
-  presentation-ready HTML deck containing Problem Statement, User Story, and
-  Architecture slides, stores its JSON and HTML assets, and supports preview and
-  download.
-- AC-5: The Describe Idea → Structure Story → Generate HTML Architecture →
-  Generate Slides path completes in one project without re-entering approved
-  information.
+- AC-4: Given an approved outline, the agent generates a presentation-ready HTML
+  deck containing Problem Statement, User Scenarios, Solution, and Architecture
+  slides, stores its JSON and HTML assets, and supports preview and download.
+- AC-5: The user can edit the central outline directly, see it autosave, approve it
+  once, and generate slides without re-entering information.
+- AC-5a: Given generated slides, the agent creates one editable grounded speaker
+  note for every slide and stores it with asset lineage.
 - AC-6: Given a recording containing at least one qualifying inactive section,
   the agent identifies and accelerates that section according to the configured
   thresholds without losing A/V synchronization.

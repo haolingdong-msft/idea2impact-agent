@@ -4,6 +4,7 @@ import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import architectureRoutes from "./routes/architecture.js";
 import {
+  getProject,
   projectDirectory,
   storeProjectJsonAsset,
   type ProjectManifest,
@@ -13,10 +14,19 @@ import slideRoutes from "./routes/slides.js";
 import type { RepositoryEvidence } from "./routes/repository.js";
 
 vi.mock("./architecture-visual.js", () => ({
+  architectureImageConfiguration: vi.fn(() => ({
+    deployment: "gpt-image-2",
+    width: 1536,
+    height: 864,
+  })),
   generateArchitectureImage: vi.fn().mockResolvedValue(
     new Uint8Array(Buffer.from("generated-design-graph")),
   ),
   isArchitectureImageConfigured: vi.fn(() => true),
+  parseArchitectureImage: vi.fn().mockResolvedValue({
+    architecture: { title: "Image-derived architecture" },
+    layout: { width: 1600, height: 900, nodes: [], connections: [] },
+  }),
 }));
 
 const GRAPH = {
@@ -109,6 +119,22 @@ const GRAPH = {
       description: "Hosts the presentation web and API services.",
       technology: "Azure Container Apps",
       componentNodeIds: ["web-ui", "api"],
+      toolings: [
+        {
+          id: "brief-capture",
+          label: "Brief capture",
+          description: "Captures the project brief.",
+          technology: "React form",
+          componentNodeId: "web-ui",
+        },
+        {
+          id: "approval-persistence",
+          label: "Approval persistence",
+          description: "Persists approved story revisions.",
+          technology: "Express API",
+          componentNodeId: "api",
+        },
+      ],
       provenance: "confirmed",
     },
     {
@@ -117,6 +143,13 @@ const GRAPH = {
       description: "Hosts the presentation agent.",
       technology: "Microsoft Foundry",
       componentNodeIds: ["foundry-agent"],
+      toolings: [{
+        id: "architecture-generation",
+        label: "Architecture generation",
+        description: "Generates validated architecture JSON.",
+        technology: "Foundry Hosted Agent",
+        componentNodeId: "foundry-agent",
+      }],
       provenance: "confirmed",
     },
     {
@@ -125,6 +158,22 @@ const GRAPH = {
       description: "Provides storage and repository evidence.",
       technology: "Durable storage and GitHub API",
       componentNodeIds: ["asset-store", "github"],
+      toolings: [
+        {
+          id: "asset-write",
+          label: "Project asset write",
+          description: "Stores versioned presentation assets.",
+          technology: "Project asset store",
+          componentNodeId: "asset-store",
+        },
+        {
+          id: "github-file-read",
+          label: "GitHub file read",
+          description: "Reads bounded repository evidence.",
+          technology: "GitHub API",
+          componentNodeId: "github",
+        },
+      ],
       provenance: "confirmed",
     },
   ],
@@ -138,6 +187,8 @@ const GRAPH = {
         label: "Submit brief",
         userAction: "Provide the idea and optional repository.",
         platformCalls: [{
+          platformId: "container-apps",
+          toolingId: "brief-capture",
           nodeId: "web-ui",
           action: "capture project brief",
           mechanism: "React form",
@@ -150,6 +201,8 @@ const GRAPH = {
         label: "Approve story",
         userAction: "Review and approve the generated story.",
         platformCalls: [{
+          platformId: "container-apps",
+          toolingId: "approval-persistence",
           nodeId: "api",
           action: "persist approvals",
           mechanism: "HTTPS JSON",
@@ -162,6 +215,8 @@ const GRAPH = {
         label: "Generate architecture",
         userAction: "Request grounded architecture options.",
         platformCalls: [{
+          platformId: "foundry-platform",
+          toolingId: "architecture-generation",
           nodeId: "foundry-agent",
           action: "generate validated architecture",
           mechanism: "Foundry invocation",
@@ -174,6 +229,8 @@ const GRAPH = {
         label: "Create slides",
         userAction: "Generate the final presentation deck.",
         platformCalls: [{
+          platformId: "data-integrations",
+          toolingId: "asset-write",
           nodeId: "asset-store",
           action: "store generated deck",
           mechanism: "project asset write",
@@ -264,12 +321,20 @@ const DECK = {
       bullets: ["Teams repeatedly recreate the same technical story."],
     },
     {
-      id: "user-story",
-      kind: "user-story",
-      eyebrow: "User story",
+      id: "user-scenarios",
+      kind: "user-scenarios",
+      eyebrow: "User scenarios",
       title: "Create reviewable assets from one brief",
       subtitle: "",
-      bullets: ["Users approve the story before generation."],
+      bullets: ["Users refine scenarios before one combined approval."],
+    },
+    {
+      id: "solution",
+      kind: "solution",
+      eyebrow: "Solution",
+      title: "Keep presentation assets synchronized",
+      subtitle: "",
+      bullets: ["One approved outline grounds every generated asset."],
     },
     {
       id: "architecture",
@@ -300,7 +365,7 @@ function hostedFetch(graph: typeof GRAPH) {
     };
     const content = invocation.operation === "architecture"
       ? JSON.stringify(graph)
-      : invocation.operation === "architecture-html"
+      : ["architecture-html", "architecture-image-html"].includes(invocation.operation)
         ? `<!doctype html><html><head><style>body{margin:0}.system{display:grid}</style></head><body>
 <main class="system" data-architecture-flow>
 <section data-component="user">User</section>
@@ -337,18 +402,19 @@ async function createProject(
   return response.body.project as ProjectManifest;
 }
 
-async function approveStory(
-  app: ReturnType<typeof createApp>,
+async function approveOutline(
+  _app: ReturnType<typeof createApp>,
   projectId: string,
   context: string,
 ) {
-  const response = await request(app)
-    .put(`/projects/${projectId}/story`)
-    .send({
-      context,
-      approvedSections: ["problem", "userStory", "architecture"],
-    });
-  expect(response.status).toBe(200);
+  const project = await getProject(projectId);
+  await storeProjectJsonAsset(projectId, "outline", {
+    problemStatement: context,
+    userScenarios: "Presenters refine scenarios and expected outcomes in one outline.",
+    solution: "The application generates architecture, slides, and speaker notes from the approved outline.",
+    status: "approved",
+    approvedAt: "2026-08-11T00:00:00.000Z",
+  }, [project?.currentAssets.brief!]);
 }
 
 async function generatePresentation(
@@ -360,12 +426,12 @@ async function generatePresentation(
     idea: "Turn a product idea into an approved technical presentation.",
     audience: "Engineering leaders",
     purpose: "Explain the solution and secure approval",
-    context: "All three story sections are approved.",
+    context: "The complete outline is approved.",
   });
   expect(architecture.status).toBe(200);
   const slides = await request(app).post("/slides").send({ projectId });
   expect(slides.status).toBe(201);
-  expect(slides.body.deck.slides).toHaveLength(4);
+  expect(slides.body.deck.slides).toHaveLength(5);
   expect(slides.body.deck.slides.some(
     (slide: { kind: string }) => slide.kind === "architecture",
   )).toBe(true);
@@ -456,10 +522,10 @@ describe("presentation workflows end to end", () => {
       evidence,
       [project.currentAssets.brief!],
     );
-    await approveStory(
+    await approveOutline(
       app,
       project.id,
-      "Problem Statement, User Story, and Architecture are grounded in the repository.",
+      "The approved Problem Statement is grounded in the repository.",
     );
     const fetchMock = hostedFetch(GRAPH);
     vi.stubGlobal("fetch", fetchMock);
@@ -480,7 +546,7 @@ describe("presentation workflows end to end", () => {
   it("generates slides from three manually described story sections", async () => {
     const app = createApp();
     const project = await createProject(app);
-    await approveStory(
+    await approveOutline(
       app,
       project.id,
       [
@@ -500,6 +566,7 @@ describe("presentation workflows end to end", () => {
       platforms: GRAPH.platforms.map(platform => ({
         ...platform,
         componentNodeIds: platform.componentNodeIds.filter(nodeId => nodeId !== "github"),
+        toolings: platform.toolings.filter(tooling => tooling.componentNodeId !== "github"),
       })),
       connections: GRAPH.connections
         .filter(connection => connection.to !== "github")

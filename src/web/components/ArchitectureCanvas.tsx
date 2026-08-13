@@ -135,6 +135,8 @@ export function ArchitectureCanvas({
 
   const activeHtmlUrl = activeVisualMode === 'narrative-html'
     ? visual?.narrativeHtmlUrl
+    : activeVisualMode === 'image-html'
+      ? visual?.imageDerivedHtmlUrl
     : activeVisualMode === 'validated-json-html'
       ? visual?.validatedJsonHtmlUrl
       : visual?.htmlUrl
@@ -142,6 +144,7 @@ export function ArchitectureCanvas({
     (
       activeVisualMode === 'html' ||
       activeVisualMode === 'narrative-html' ||
+      activeVisualMode === 'image-html' ||
       activeVisualMode === 'validated-json-html'
     ) &&
     activeHtmlUrl
@@ -153,6 +156,8 @@ export function ArchitectureCanvas({
             <span className="eyebrow">
               {activeVisualMode === 'narrative-html'
                 ? 'Agent narrative → Copilot HTML + CSS'
+                : activeVisualMode === 'image-html'
+                  ? 'GPT-Image-2 → vision extraction → Copilot HTML + CSS'
                 : activeVisualMode === 'validated-json-html'
                   ? 'Validated JSON → Copilot HTML + CSS'
                 : 'Full-context Copilot HTML + CSS'}
@@ -180,6 +185,8 @@ export function ArchitectureCanvas({
     (activeVisualMode === 'image' || activeVisualMode === 'narrative-image') &&
     activeImageUrl
   ) {
+    const editablePptxUrl = visual?.pptxDownloadUrl ||
+      activeImageUrl.replace(/\/architecture\/image$/, '/architecture/download.pptx')
     return (
       <section className="architecture-canvas architecture-image-canvas">
         <header className="canvas-header">
@@ -199,6 +206,15 @@ export function ArchitectureCanvas({
           src={activeImageUrl}
           alt={`${architecture.title} architecture design graph`}
         />
+        {editablePptxUrl && (
+          <a
+            className="architecture-pptx-download"
+            href={editablePptxUrl}
+            download
+          >
+            Download editable PPTX
+          </a>
+        )}
       </section>
     )
   }
@@ -209,6 +225,13 @@ export function ArchitectureCanvas({
   const nodePlatforms = new Map(
     architecture.platforms.flatMap(platform =>
       platform.componentNodeIds.map(nodeId => [nodeId, platform.label] as const)),
+  )
+  const platformNames = new Map(
+    architecture.platforms.map(platform => [platform.id, platform.label]),
+  )
+  const toolingNames = new Map(
+    architecture.platforms.flatMap(platform =>
+      (platform.toolings || []).map(tooling => [tooling.id, tooling.label] as const)),
   )
 
   return (
@@ -339,9 +362,14 @@ export function ArchitectureCanvas({
               <strong>{platform.label}</strong>
               <small>{platform.technology}</small>
               <span>
-                {platform.componentNodeIds
+                Components: {platform.componentNodeIds
                   .map(nodeId => nodeNames.get(nodeId) || nodeId)
                   .join(' · ')}
+              </span>
+              <span>
+                Toolings: {(platform.toolings || [])
+                  .map(tooling => tooling.label)
+                  .join(' · ') || 'Derived from components'}
               </span>
             </div>
           ))}
@@ -357,10 +385,12 @@ export function ArchitectureCanvas({
                   {step.platformCalls.map((call, callIndex) => (
                     <small key={`${step.id}-${call.nodeId}-${callIndex}`}>
                       <b>
-                        {nodePlatforms.get(call.nodeId) || 'Platform'} →{' '}
-                        {nodeNames.get(call.nodeId) || call.nodeId}
+                        {platformNames.get(call.platformId) || call.platformId} →{' '}
+                        {toolingNames.get(call.toolingId) || call.toolingId}
                       </b>
-                      <em>{call.action}</em>
+                      <em>
+                        {nodeNames.get(call.nodeId) || call.nodeId} · {call.action}
+                      </em>
                       <span>{call.mechanism} → {call.output}</span>
                     </small>
                   ))}

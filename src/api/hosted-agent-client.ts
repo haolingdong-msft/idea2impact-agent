@@ -22,7 +22,20 @@ async function getCredential(): Promise<Credential> {
 }
 
 export function isHostedAgentConfigured(): boolean {
-  return Boolean(process.env.PRESENTATION_AGENT_INVOCATIONS_ENDPOINT?.trim());
+  const endpoint = process.env.PRESENTATION_AGENT_INVOCATIONS_ENDPOINT?.trim();
+  if (!endpoint) return false;
+
+  const override = process.env.USE_HOSTED_AGENT?.trim().toLowerCase();
+  if (override === "false") return false;
+  if (override === "true") return true;
+
+  try {
+    const url = new URL(endpoint);
+    return url.protocol === "http:" &&
+      ["localhost", "127.0.0.1"].includes(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 async function authorizationHeader(endpoint: string): Promise<string | null> {
@@ -41,7 +54,7 @@ async function authorizationHeader(endpoint: string): Promise<string | null> {
 }
 
 export async function invokeHostedAgent(
-  operation: "chat" | "architecture" | "architecture-html" | "architecture-brief" | "slides",
+  operation: "chat" | "outline" | "architecture" | "architecture-html" | "architecture-image-html" | "architecture-brief" | "slides" | "speech-script",
   input: Record<string, unknown>,
   requestId = randomUUID(),
 ): Promise<Response> {
@@ -79,7 +92,7 @@ export async function invokeHostedAgent(
 }
 
 export async function invokeHostedStructured(
-  operation: "architecture" | "architecture-html" | "architecture-brief" | "slides",
+  operation: "outline" | "architecture" | "architecture-html" | "architecture-image-html" | "architecture-brief" | "slides" | "speech-script",
   input: Record<string, unknown>,
 ): Promise<string> {
   const response = await invokeHostedAgent(operation, input);

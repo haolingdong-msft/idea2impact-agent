@@ -13,7 +13,7 @@ describe('IdeaBrief', () => {
       screen.getByLabelText('Idea'),
       'Create technical architecture slides from an idea.',
     )
-    await user.click(screen.getByRole('button', { name: /start story/i }))
+    await user.click(screen.getByRole('button', { name: /start outline/i }))
 
     expect(onSubmit).toHaveBeenCalledWith({
       title: 'Untitled presentation',
@@ -38,36 +38,39 @@ describe('IdeaBrief', () => {
       screen.getByLabelText('GitHub repository URL (optional)'),
       'https://github.com/example/repository',
     )
-    await user.click(screen.getByRole('button', { name: /start story/i }))
+    await user.click(screen.getByRole('button', { name: /start outline/i }))
 
     expect(onSubmit.mock.calls[0][0].repositoryUrl).toBe(
       'https://github.com/example/repository',
     )
   })
 
-  it('supports one-click slide generation from idea and codebase', async () => {
+  it('enables codebase quick test only after a repository URL is entered', async () => {
     const user = userEvent.setup()
-    const onQuickGenerate = vi.fn()
+    const onQuickTest = vi.fn()
     render(
       <IdeaBrief
         isLoading={false}
         onSubmit={vi.fn()}
-        onQuickGenerate={onQuickGenerate}
+        onQuickTest={onQuickTest}
       />,
     )
     await user.type(
       screen.getByLabelText('Idea'),
-      'Generate slides directly from this product and its codebase.',
+      'Generate slides directly from this codebase for a quick test.',
     )
+    const quickButton = screen.getByRole('button', {
+      name: /quick test: generate slides/i,
+    })
+    expect(quickButton).toBeDisabled()
     await user.click(screen.getByText('Optional details and codebase'))
     await user.type(
       screen.getByLabelText('GitHub repository URL (optional)'),
       'https://github.com/example/repository',
     )
-    await user.click(screen.getByRole('button', { name: /quick generate slides/i }))
-
-    expect(onQuickGenerate).toHaveBeenCalledWith(expect.objectContaining({
-      idea: 'Generate slides directly from this product and its codebase.',
+    expect(quickButton).toBeEnabled()
+    await user.click(quickButton)
+    expect(onQuickTest).toHaveBeenCalledWith(expect.objectContaining({
       repositoryUrl: 'https://github.com/example/repository',
     }))
   })

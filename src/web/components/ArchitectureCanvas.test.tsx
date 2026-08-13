@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 import { ArchitectureCanvas } from './ArchitectureCanvas'
 import type { ArchitectureGraph } from '../types'
 
@@ -47,6 +47,13 @@ const architecture: ArchitectureGraph = {
       description: 'Hosts the workspace.',
       technology: 'React',
       componentNodeIds: ['web'],
+      toolings: [{
+        id: 'brief-capture',
+        label: 'Brief capture',
+        description: 'Captures presentation context.',
+        technology: 'React form',
+        componentNodeId: 'web',
+      }],
       provenance: 'confirmed',
     },
     {
@@ -55,6 +62,13 @@ const architecture: ArchitectureGraph = {
       description: 'Hosts graph generation.',
       technology: 'GitHub Copilot SDK',
       componentNodeIds: ['copilot'],
+      toolings: [{
+        id: 'graph-generation',
+        label: 'Graph generation',
+        description: 'Generates architecture JSON.',
+        technology: 'GitHub Copilot SDK',
+        componentNodeId: 'copilot',
+      }],
       provenance: 'confirmed',
     },
   ],
@@ -68,6 +82,8 @@ const architecture: ArchitectureGraph = {
         label: 'Submit brief',
         userAction: 'Provide the presentation context.',
         platformCalls: [{
+          platformId: 'web-platform',
+          toolingId: 'brief-capture',
           nodeId: 'web',
           action: 'capture context',
           mechanism: 'browser form',
@@ -80,6 +96,8 @@ const architecture: ArchitectureGraph = {
         label: 'Generate graph',
         userAction: 'Request the architecture.',
         platformCalls: [{
+          platformId: 'copilot-platform',
+          toolingId: 'graph-generation',
           nodeId: 'copilot',
           action: 'generate graph',
           mechanism: 'Copilot SDK',
@@ -115,6 +133,9 @@ describe('ArchitectureCanvas', () => {
     expect(screen.getAllByText('GitHub Copilot SDK')).not.toHaveLength(0)
     expect(screen.getByText('Assumed')).toBeInTheDocument()
     expect(screen.getByText('Technical component interactions')).toBeInTheDocument()
+    expect(screen.getByText('User workflow · Presenter')).toBeInTheDocument()
+    expect(screen.getAllByText('Web Platform → Brief capture')).not.toHaveLength(0)
+    expect(screen.getAllByText('GitHub Copilot → Graph generation')).not.toHaveLength(0)
     expect(screen.getByText('HTTPS JSON / approved context')).toBeInTheDocument()
     expect(container.querySelectorAll('.architecture-layer')).toHaveLength(2)
     expect(container.querySelectorAll('.architecture-node')).toHaveLength(2)
@@ -145,21 +166,16 @@ describe('ArchitectureCanvas', () => {
     expect(screen.getByText('Creative / non-deterministic')).toBeInTheDocument()
   })
 
-  it('switches between both generated architecture designs', () => {
-    const onSelectedModeChange = vi.fn()
+  it('renders the single image option with an editable PPTX download', () => {
     render(
       <ArchitectureCanvas
         architecture={architecture}
         visual={{
-          mode: 'dual',
-          htmlUrl: '/architecture.html',
-          validatedJsonHtmlUrl: '/architecture-validated-json.html',
-          narrativeHtmlUrl: '/architecture-narrative.html',
+          mode: 'image',
           imageUrl: '/architecture.png',
-          narrativeImageUrl: '/architecture-narrative.png',
+          pptxDownloadUrl: '/architecture.pptx',
         }}
         selectedMode="image"
-        onSelectedModeChange={onSelectedModeChange}
         isLoading={false}
         error={null}
       />,
@@ -168,15 +184,9 @@ describe('ArchitectureCanvas', () => {
     expect(screen.getByAltText(
       'Presentation Agent Architecture architecture design graph',
     )).toHaveAttribute('src', '/architecture.png')
-    fireEvent.click(screen.getByRole('button', { name: 'Full context → HTML/CSS' }))
-    expect(onSelectedModeChange).toHaveBeenCalledWith('html')
-    fireEvent.click(screen.getByRole('button', { name: 'Agent narrative → image' }))
-    expect(onSelectedModeChange).toHaveBeenCalledWith('narrative-image')
-    fireEvent.click(screen.getByRole('button', { name: 'Agent narrative → HTML/CSS' }))
-    expect(onSelectedModeChange).toHaveBeenCalledWith('narrative-html')
-    fireEvent.click(screen.getByRole('button', {
-      name: 'Validated JSON → Copilot HTML/CSS',
-    }))
-    expect(onSelectedModeChange).toHaveBeenCalledWith('validated-json-html')
+    expect(screen.getByRole('link', { name: 'Download editable PPTX' }))
+      .toHaveAttribute('href', '/architecture.pptx')
+    expect(screen.queryByRole('button', { name: 'Full context → HTML/CSS' }))
+      .not.toBeInTheDocument()
   })
 })

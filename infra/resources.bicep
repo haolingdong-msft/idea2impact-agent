@@ -221,6 +221,10 @@ module containerAppApi 'br/public:avm/ptn/azd/acr-container-app:0.4.0' = {
           name: 'PRESENTATION_AGENT_INVOCATIONS_ENDPOINT'
           value: presentationAgentInvocationsEndpoint
         }
+        {
+          name: 'USE_HOSTED_AGENT'
+          value: 'true'
+        }
       ] : [],
       useArchitectureVisualModels ? [
         { name: 'ARCHITECTURE_MODEL_ENDPOINT', value: architectureModelEndpoint }

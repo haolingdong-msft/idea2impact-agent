@@ -415,9 +415,11 @@ router.post("/projects/:projectId/repository/scan", async (req, res) => {
     );
     await clearCurrentProjectAssets(project.id, [
       "story",
+      "outline",
       "architecture",
       "slide-model",
       "slide-deck",
+      "speech-script",
     ]);
     res.status(201).json({
       evidence: repositoryEvidenceSummary(evidence),

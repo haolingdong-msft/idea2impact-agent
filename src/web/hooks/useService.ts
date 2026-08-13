@@ -114,7 +114,7 @@ export function useService() {
         setMessages([...messagesRef.current])
       }
     } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return
+      if (err instanceof DOMException && err.name === 'AbortError') return messagesRef.current
       messagesRef.current = messagesRef.current.map(m =>
         m.id === assistantId ? {
           ...m,
@@ -126,6 +126,7 @@ export function useService() {
     } finally {
       setIsLoading(false)
     }
+    return messagesRef.current
   }, [])
 
   return { messages, isLoading, sendMessage, resetConversation }

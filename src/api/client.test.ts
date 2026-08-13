@@ -32,4 +32,10 @@ describe("getClient", () => {
     const client2 = await getClient();
     expect(client1).toBe(client2);
   });
+
+  it("fails fast when local Copilot authentication is missing", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "");
+    const { getClient } = await import("./client.js");
+    await expect(getClient()).rejects.toThrow("GITHUB_TOKEN is required");
+  });
 });

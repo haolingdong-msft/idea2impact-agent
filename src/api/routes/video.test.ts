@@ -78,6 +78,7 @@ const createdProjects: string[] = [];
 
 function createApp() {
   const app = express();
+  app.use(express.json());
   app.use(videoRoutes);
   return app;
 }
@@ -136,5 +137,40 @@ describe("video routes", () => {
     expect(reloaded?.currentAssets["source-video"]).toBe(response.body.assets.source.id);
     expect(reloaded?.currentAssets["refined-video"]).toBe(response.body.assets.refined.id);
     expect(reloaded?.currentAssets.export).toBe(response.body.assets.processing.id);
+  });
+
+  it("separates source upload from stored-asset refinement", async () => {
+    const project = await createProject({
+      title: "Presentation Agent",
+      idea: "Upload a recording before creating a separate refined output.",
+      audience: "Engineering leaders",
+      purpose: "Demonstrate staged video processing",
+    });
+    createdProjects.push(project.id);
+
+    const upload = await request(createApp())
+      .post(`/video/upload?projectId=${project.id}`)
+      .set("Content-Type", "video/mp4")
+      .set("X-File-Name", encodeURIComponent("demo.mp4"))
+      .send(Buffer.from([0x00, 0x01, 0x02, 0x03]));
+    expect(upload.status).toBe(201);
+    expect(upload.body.asset.type).toBe("source-video");
+    expect((await getProject(project.id))?.currentAssets["refined-video"]).toBeUndefined();
+
+    const refined = await request(createApp())
+      .post("/video/refine-stored")
+      .send({
+        projectId: project.id,
+        sourceAssetId: upload.body.asset.id,
+        options: {
+          targetSpeed: 4,
+          minimumInactiveDuration: 2.5,
+          clarity: "standard",
+          resolution: "source",
+        },
+      });
+    expect(refined.status).toBe(201);
+    expect(refined.body.assets.refined.sourceAssetIds).toContain(upload.body.asset.id);
+    expect(refined.body.assets.source.id).toBe(upload.body.asset.id);
   });
 });

@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Router } from "express";
 import { getClient } from "../client.js";
 import { enhanceModelError, getSessionOptions } from "../model-config.js";
@@ -6,6 +9,7 @@ import {
   ARCHITECTURE_GRAPH_REPAIR_PROMPT,
   ARCHITECTURE_HTML_PROMPT,
   ARCHITECTURE_HTML_REPAIR_PROMPT,
+  ARCHITECTURE_IMAGE_HTML_PROMPT,
   ARCHITECTURE_IMAGE_BRIEF_PROMPT,
   PRESENTATION_AGENT_INSTRUCTIONS,
 } from "../presentation-instructions.js";
@@ -26,6 +30,10 @@ import {
 } from "../hosted-agent-client.js";
 import { repositoryPromptContext } from "./repository-context.js";
 import {
+  applyArchitectureImageLayoutGuard,
+} from "../architecture-html-layout.js";
+import {
+  architectureImageConfiguration,
   generateArchitectureImage,
   isArchitectureImageConfigured,
   type ArchitectureVisual,
@@ -61,6 +69,13 @@ export type ArchitectureGraph = {
     description: string;
     technology: string;
     componentNodeIds: string[];
+    toolings: Array<{
+      id: string;
+      label: string;
+      description: string;
+      technology: string;
+      componentNodeId: string;
+    }>;
     provenance: "confirmed" | "assumed";
   }>;
   workflow: {
@@ -72,6 +87,8 @@ export type ArchitectureGraph = {
       label: string;
       userAction: string;
       platformCalls: Array<{
+        platformId: string;
+        toolingId: string;
         nodeId: string;
         action: string;
         mechanism: string;
@@ -94,7 +111,17 @@ export type ArchitectureGraph = {
 };
 
 interface ArchitectureSession {
-  sendAndWait(msg: { prompt: string }, timeout: number): Promise<{ data?: unknown } | undefined>;
+  sendAndWait(
+    msg: {
+      prompt: string;
+      attachments?: Array<{
+        type: "file";
+        path: string;
+        displayName?: string;
+      }>;
+    },
+    timeout: number,
+  ): Promise<{ data?: unknown } | undefined>;
   destroy(): Promise<void>;
 }
 
@@ -102,6 +129,14 @@ type GeneratedArchitecture = {
   architecture: ArchitectureGraph;
   visual: ArchitectureVisual;
 };
+
+type ArchitectureVisualMode =
+  | "html"
+  | "image"
+  | "narrative-image"
+  | "narrative-html"
+  | "validated-json-html"
+  | "image-html";
 
 const NODE_KINDS = new Set([
   "actor",
@@ -115,8 +150,115 @@ const NODE_KINDS = new Set([
 const TONES = new Set(["navy", "blue", "teal", "violet", "amber"]);
 const PROVENANCE = new Set(["confirmed", "assumed"]);
 const CONNECTION_TYPES = new Set(["request", "event", "data", "auth"]);
-const MAX_REPAIR_RESPONSE = 60_000;
+const VISUAL_MODES = new Set<ArchitectureVisualMode>([
+  "html",
+  "image",
+  "narrative-image",
+  "narrative-html",
+  "validated-json-html",
+  "image-html",
+]);
+const MAX_REPAIR_RESPONSE = 58_000;
 const MAX_VALIDATION_FEEDBACK = 1_000;
+
+type ArchitectureProgress = {
+  status: "idle" | "running" | "completed" | "failed";
+  stage: string;
+  percent: number;
+  completedTasks: number;
+  totalTasks: number;
+  tasks: Array<{
+    id: string;
+    label: string;
+    status: "pending" | "running" | "completed" | "failed";
+    error?: string;
+  }>;
+  startedAt: string;
+  updatedAt: string;
+  error?: string;
+};
+
+const architectureProgress = new Map<string, ArchitectureProgress>();
+const VISUAL_TASKS = [
+  ["validated-json-image", "Validated JSON → GPT-Image-2"],
+] as const;
+
+function updateArchitectureProgress(
+  projectId: string,
+  update: Partial<ArchitectureProgress>,
+): void {
+  const current = architectureProgress.get(projectId);
+  if (!current) return;
+  architectureProgress.set(projectId, {
+    ...current,
+    ...update,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+function startArchitectureProgress(projectId: string): void {
+  const now = new Date().toISOString();
+  architectureProgress.set(projectId, {
+    status: "running",
+    stage: "Generating validated architecture JSON",
+    percent: 5,
+    completedTasks: 0,
+    totalTasks: VISUAL_TASKS.length,
+    tasks: VISUAL_TASKS.map(([id, label]) => ({
+      id,
+      label,
+      status: "pending",
+    })),
+    startedAt: now,
+    updatedAt: now,
+  });
+}
+
+async function runVisualTask<T>(
+  projectId: string,
+  taskId: string,
+  task: () => Promise<T>,
+): Promise<T> {
+  const current = architectureProgress.get(projectId);
+  if (current) {
+    updateArchitectureProgress(projectId, {
+      stage: "Generating the architecture image",
+      tasks: current.tasks.map(item =>
+        item.id === taskId ? { ...item, status: "running" } : item),
+    });
+  }
+  try {
+    const result = await task();
+    const latest = architectureProgress.get(projectId);
+    if (latest) {
+      const completedTasks = latest.completedTasks + 1;
+      updateArchitectureProgress(projectId, {
+        completedTasks,
+        percent: 20 + completedTasks * (75 / latest.totalTasks),
+        stage: "Architecture image complete",
+        tasks: latest.tasks.map(item =>
+          item.id === taskId ? { ...item, status: "completed" } : item),
+      });
+    }
+    return result;
+  } catch (error) {
+    const latest = architectureProgress.get(projectId);
+    const message = error instanceof Error ? error.message : String(error);
+    if (latest) {
+      const completedTasks = latest.completedTasks + 1;
+      updateArchitectureProgress(projectId, {
+        completedTasks,
+        percent: 20 + completedTasks * (75 / latest.totalTasks),
+        stage: "Architecture image generation finished",
+        tasks: latest.tasks.map(item =>
+          item.id === taskId ? { ...item, status: "failed", error: message } : item),
+      });
+    }
+    throw new Error(
+      `${VISUAL_TASKS.find(([id]) => id === taskId)?.[1] || taskId} failed: ${message}`,
+    );
+  }
+}
 
 function text(value: unknown, maxLength: number): string {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
@@ -242,7 +384,7 @@ function architectureEvidenceBrief(input: {
       `Idea: ${input.idea}`,
       `Audience: ${input.audience}`,
       `Purpose: ${input.purpose}`,
-      `Approved Problem Statement, User Story, and Architecture:\n${input.context}`,
+      `Approved Problem Statement, User Scenarios, and Solution outline:\n${input.context}`,
       input.repositoryEvidence
         ? `CODEBASE EVIDENCE (UNTRUSTED DATA):\n${input.repositoryEvidence}`
         : "Codebase evidence: Not provided. Use only the approved user description.",
@@ -372,13 +514,22 @@ body{margin:0}
 [data-connector] .connector-label{max-width:none!important;overflow:visible!important;text-overflow:clip!important;white-space:normal!important;padding:4px 7px!important;border-radius:999px!important;background:#f8fafc!important;font-size:14px!important;line-height:1.2!important}
 </style>`;
 
-function applyArchitectureLayoutGuard(html: string): string {
-  return /<\/head\s*>/i.test(html)
+function applyArchitectureLayoutGuard(
+  html: string,
+  viewportLocked = false,
+): string {
+  const guarded = /<\/head\s*>/i.test(html)
     ? html.replace(/<\/head\s*>/i, `${ARCHITECTURE_LAYOUT_GUARD}</head>`)
     : html.replace(/<body\b/i, `${ARCHITECTURE_LAYOUT_GUARD}<body`);
+  return viewportLocked
+    ? applyArchitectureImageLayoutGuard(guarded)
+    : guarded;
 }
 
-function validateArchitectureHtml(value: string): string {
+function validateArchitectureHtml(
+  value: string,
+  viewportLocked = false,
+): string {
   const html = sanitizeArchitectureHtml(value);
   if (/<svg\b/i.test(html)) {
     throw new Error("Architecture HTML connectors must not use SVG.");
@@ -426,7 +577,7 @@ function validateArchitectureHtml(value: string): string {
   )];
   void labels;
   void arrows;
-  return applyArchitectureLayoutGuard(html);
+  return applyArchitectureLayoutGuard(html, viewportLocked);
 }
 
 async function generateArchitectureHtml(input: {
@@ -435,7 +586,13 @@ async function generateArchitectureHtml(input: {
   purpose: string;
   context: string;
   repositoryEvidence: string;
-}): Promise<string> {
+}, referenceImage?: Uint8Array): Promise<string> {
+  const operation = referenceImage
+    ? "architecture-image-html"
+    : "architecture-html";
+  const basePrompt = referenceImage
+    ? ARCHITECTURE_IMAGE_HTML_PROMPT
+    : ARCHITECTURE_HTML_PROMPT;
   if (isHostedAgentConfigured()) {
     const hostedInput = {
       idea: input.idea,
@@ -443,17 +600,23 @@ async function generateArchitectureHtml(input: {
       purpose: input.purpose,
       context: input.context,
       repositoryEvidence: input.repositoryEvidence || undefined,
+      ...(referenceImage
+        ? {
+            imageBase64: Buffer.from(referenceImage).toString("base64"),
+            imageMediaType: "image/png",
+          }
+        : {}),
     };
-    let content = await invokeHostedStructured("architecture-html", hostedInput);
+    let content = await invokeHostedStructured(operation, hostedInput);
     try {
-      return validateArchitectureHtml(content);
+      return validateArchitectureHtml(content, Boolean(referenceImage));
     } catch (error) {
-      content = await invokeHostedStructured("architecture-html", {
+      content = await invokeHostedStructured(operation, {
         ...hostedInput,
         validationFeedback: validationMessage(error),
         previousResponse: content.slice(0, MAX_REPAIR_RESPONSE),
       });
-      return validateArchitectureHtml(content);
+      return validateArchitectureHtml(content, Boolean(referenceImage));
     }
   }
   const copilot = await getClient();
@@ -464,31 +627,54 @@ async function generateArchitectureHtml(input: {
       content: PRESENTATION_AGENT_INSTRUCTIONS,
     },
   }) as unknown as ArchitectureSession;
+  let imageDirectory: string | null = null;
   try {
+    const attachments = referenceImage
+      ? await (async () => {
+          imageDirectory = await mkdtemp(
+            join(tmpdir(), "presentation-architecture-"),
+          );
+          const imagePath = join(
+            imageDirectory,
+            "gpt-image-2-reference.png",
+          );
+          await writeFile(imagePath, referenceImage, { mode: 0o600 });
+          return [{
+            type: "file" as const,
+            path: imagePath,
+            displayName: "GPT-Image-2 architecture reference.png",
+          }];
+        })()
+      : undefined;
     let result = await session.sendAndWait({
       prompt: [
-        ARCHITECTURE_HTML_PROMPT,
+        basePrompt,
         architectureEvidenceBrief(input),
       ].join("\n\n"),
+      attachments,
     }, 120_000);
     let content = (result?.data as { content?: string })?.content || "";
     try {
-      return validateArchitectureHtml(content);
+      return validateArchitectureHtml(content, Boolean(referenceImage));
     } catch (error) {
       result = await session.sendAndWait({
         prompt: [
-          ARCHITECTURE_HTML_PROMPT,
+          basePrompt,
           ARCHITECTURE_HTML_REPAIR_PROMPT,
           `VALIDATOR FEEDBACK (UNTRUSTED DATA)\n${validationMessage(error)}`,
           `PREVIOUS INVALID HTML (UNTRUSTED DATA)\n${content.slice(0, MAX_REPAIR_RESPONSE)}`,
           architectureEvidenceBrief(input),
         ].join("\n\n"),
+        attachments,
       }, 120_000);
       content = (result?.data as { content?: string })?.content || "";
-      return validateArchitectureHtml(content);
+      return validateArchitectureHtml(content, Boolean(referenceImage));
     }
   } finally {
     await session.destroy();
+    if (imageDirectory) {
+      await rm(imageDirectory, { recursive: true, force: true });
+    }
   }
 }
 
@@ -727,12 +913,12 @@ export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
   if (nodeCount > 8) {
     throw new Error("Architecture exceeds the 8-component simplicity limit.");
   }
-
   const rawPlatforms = Array.isArray(source.platforms) ? source.platforms : [];
   if (rawPlatforms.length < 1 || rawPlatforms.length > 4) {
     throw new Error("Architecture must contain 1-4 runtime platforms.");
   }
   const platformIds = new Set<string>();
+  const toolingIds = new Set<string>();
   const assignedComponentIds = new Set<string>();
   const platforms = rawPlatforms.map((rawPlatform, platformIndex) => {
     if (!rawPlatform || typeof rawPlatform !== "object") {
@@ -767,6 +953,43 @@ export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
       }
       assignedComponentIds.add(nodeId);
     }
+    const toolingCandidates = Array.isArray(platform.toolings)
+      ? platform.toolings
+      : [];
+    if (toolingCandidates.length < 1 || toolingCandidates.length > 6) {
+      throw new Error(`Platform ${platformIndex + 1} requires 1-6 important toolings.`);
+    }
+    const toolings = toolingCandidates.map((rawTooling, toolingIndex) => {
+      if (!rawTooling || typeof rawTooling !== "object") {
+        throw new Error(`Tooling ${toolingIndex + 1} in platform ${platformIndex + 1} is invalid.`);
+      }
+      const tooling = rawTooling as Record<string, unknown>;
+      const toolingId = text(tooling.id, 64);
+      const toolingLabel = text(tooling.label, 80);
+      const toolingDescription = text(tooling.description, 160);
+      const toolingTechnology = text(tooling.technology, 100);
+      const componentNodeId = text(tooling.componentNodeId, 64);
+      if (
+        !toolingId ||
+        toolingIds.has(toolingId) ||
+        !toolingLabel ||
+        !toolingDescription ||
+        !toolingTechnology ||
+        !componentNodeIds.includes(componentNodeId)
+      ) {
+        throw new Error(
+          `Tooling ${toolingIndex + 1} in platform ${platformIndex + 1} must be unique and reference a component hosted by that platform.`,
+        );
+      }
+      toolingIds.add(toolingId);
+      return {
+        id: toolingId,
+        label: toolingLabel,
+        description: toolingDescription,
+        technology: toolingTechnology,
+        componentNodeId,
+      };
+    });
     platformIds.add(id);
     return {
       id,
@@ -774,6 +997,7 @@ export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
       description,
       technology,
       componentNodeIds,
+      toolings,
       provenance: provenance as "confirmed" | "assumed",
     };
   });
@@ -787,6 +1011,17 @@ export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
       }.`,
     );
   }
+  const platformByNodeId = new Map(
+    platforms.flatMap(platform =>
+      platform.componentNodeIds.map(nodeId => [nodeId, platform] as const)),
+  );
+  const toolingById = new Map(
+    platforms.flatMap(platform =>
+      platform.toolings.map(tooling => [
+        tooling.id,
+        { platform, tooling },
+      ] as const)),
+  );
 
   const rawConnections = Array.isArray(source.connections) ? source.connections : [];
   if (rawConnections.length === 0) {
@@ -896,15 +1131,28 @@ export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
         }
         const call = rawCall as Record<string, unknown>;
         const nodeId = text(call.nodeId, 64);
+        const inferredPlatform = platformByNodeId.get(nodeId);
+        const platformId = text(call.platformId, 64);
+        const toolingId = text(call.toolingId, 64);
         const action = text(call.action, 100);
         const mechanism = text(call.mechanism, 80);
         const output = text(call.output, 120);
-        if (!nodeIds.has(nodeId) || !action || !mechanism || !output) {
+        const toolingReference = toolingById.get(toolingId);
+        if (
+          !nodeIds.has(nodeId) ||
+          !platformIds.has(platformId) ||
+          inferredPlatform?.id !== platformId ||
+          toolingReference?.platform.id !== platformId ||
+          toolingReference?.tooling.componentNodeId !== nodeId ||
+          !action ||
+          !mechanism ||
+          !output
+        ) {
           throw new Error(
-            `Platform call ${callIndex + 1} in workflow step ${index + 1} must reference a real component and describe action, mechanism, and output.`,
+            `Platform call ${callIndex + 1} in workflow step ${index + 1} must reference a real platform, tooling, and component, then describe action, mechanism, and output.`,
           );
         }
-        return { nodeId, action, mechanism, output };
+        return { platformId, toolingId, nodeId, action, mechanism, output };
       });
       return {
         id,
@@ -932,13 +1180,22 @@ export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
 }
 
 router.post("/architecture", async (req, res) => {
-  const { idea, audience, purpose, context, projectId, generateVisuals } = req.body as {
+  const {
+    idea,
+    audience,
+    purpose,
+    context,
+    projectId,
+    generateVisuals,
+    visualMode,
+  } = req.body as {
     idea?: unknown;
     audience?: unknown;
     purpose?: unknown;
     context?: unknown;
     projectId?: unknown;
     generateVisuals?: unknown;
+    visualMode?: unknown;
   };
 
   if (typeof idea !== "string" || idea.trim().length < 10) {
@@ -961,11 +1218,22 @@ router.post("/architecture", async (req, res) => {
     res.status(400).json({ error: "'generateVisuals' must be a boolean when provided" });
     return;
   }
+  if (
+    visualMode !== undefined &&
+    (typeof visualMode !== "string" ||
+      !VISUAL_MODES.has(visualMode as ArchitectureVisualMode))
+  ) {
+    res.status(400).json({ error: "'visualMode' must name a supported architecture visual" });
+    return;
+  }
   const project = projectId === undefined
     ? null
     : isProjectId(projectId)
       ? await getProject(projectId)
       : null;
+  if (project && generateVisuals !== false) {
+    startArchitectureProgress(project.id);
+  }
   if (projectId !== undefined && !project) {
     res.status(isProjectId(projectId) ? 404 : 400).json({
       error: isProjectId(projectId)
@@ -975,21 +1243,16 @@ router.post("/architecture", async (req, res) => {
     return;
   }
   if (project) {
-    const storyAssetId = project.currentAssets.story;
-    const storedStory = storyAssetId
-      ? await readProjectAsset(project.id, storyAssetId)
+    const outlineAssetId = project.currentAssets.outline;
+    const storedOutline = outlineAssetId
+      ? await readProjectAsset(project.id, outlineAssetId)
       : null;
-    const story = storedStory
-      ? JSON.parse(storedStory.content) as { approvedSections?: unknown }
+    const outline = storedOutline
+      ? JSON.parse(storedOutline.content) as { status?: unknown }
       : null;
-    const approvedSections = Array.isArray(story?.approvedSections)
-      ? new Set(story.approvedSections)
-      : new Set();
-    if (!["problem", "userStory", "architecture"].every(
-      section => approvedSections.has(section),
-    )) {
+    if (outline?.status !== "approved") {
       res.status(409).json({
-        error: "Problem Statement, User Story, and Architecture approvals are required.",
+        error: "An approved outline is required before architecture generation.",
       });
       return;
     }
@@ -1005,9 +1268,16 @@ router.post("/architecture", async (req, res) => {
       repositoryEvidence,
     };
     const architecture = await generateLegacyArchitecture(generationInput);
+    if (project && generateVisuals !== false) {
+      updateArchitectureProgress(project.id, {
+        stage: "Validated architecture JSON complete; generating image",
+        percent: 20,
+      });
+    }
     let visual: ArchitectureVisual = { mode: "legacy" };
     let htmlAssetId: string | null = null;
     let validatedJsonHtmlAssetId: string | null = null;
+    let imageDerivedHtmlAssetId: string | null = null;
     let narrativeHtmlAssetId: string | null = null;
     let imageAssetId: string | null = null;
     let narrativeImageAssetId: string | null = null;
@@ -1018,97 +1288,156 @@ router.post("/architecture", async (req, res) => {
           "and ARCHITECTURE_IMAGE_DEPLOYMENT.",
         );
       }
-      const validatedJsonBrief = validatedArchitectureJsonBrief(architecture);
-      const [html, validatedJsonHtml, narrative] = await Promise.all([
-        generateArchitectureHtml(generationInput),
-        generateArchitectureHtml({
-          idea: architecture.title,
-          audience: generationInput.audience,
-          purpose: generationInput.purpose,
-          context: validatedJsonBrief,
-          repositoryEvidence: "",
-        }),
-        generateArchitectureNarrative(generationInput),
+      const imageConfiguration = architectureImageConfiguration();
+      const results = await Promise.allSettled([
+        runVisualTask(
+          project.id,
+          "validated-json-image",
+          () => generateArchitectureImage(architectureDesignBrief(architecture)),
+        ),
       ]);
-      const [image, narrativeImage, narrativeHtml] = await Promise.all([
-        generateArchitectureImage(architectureDesignBrief(architecture)),
-        generateArchitectureImage(narrative, "agent-summary"),
-        generateArchitectureHtml({
-          idea: narrative,
-          audience: generationInput.audience,
-          purpose: generationInput.purpose,
-          context: narrative,
-          repositoryEvidence: "",
-        }),
-      ]);
+      const resultValue = <T,>(index: number): T | null =>
+        results[index].status === "fulfilled"
+          ? results[index].value as T
+          : null;
+      const html = null;
+      const validatedJsonHtml = null;
+      const narrativeHtml = null;
+      const image = resultValue<Uint8Array>(0);
+      const imageDerivedHtml = null;
+      const narrativeImage = null;
+      const failures = results.flatMap((result, index) =>
+        result.status === "rejected"
+          ? [{
+              mode: VISUAL_TASKS[index][0],
+              error: result.reason instanceof Error
+                ? result.reason.message
+                : String(result.reason),
+            }]
+          : []);
+      if (failures.length === results.length) {
+        throw new Error(
+          `All architecture visual options failed: ${
+            failures.map(failure => failure.error).join("; ")
+          }`,
+        );
+      }
+      updateArchitectureProgress(project.id, {
+        stage: "Saving architecture image",
+        percent: 95,
+      });
       await clearCurrentProjectAssets(project.id, [
         "architecture-html",
         "architecture-validated-json-html",
+        "architecture-image-derived-html",
         "architecture-narrative-html",
         "architecture-image",
+        "architecture-pptx",
+        "architecture-pptx-preview",
         "architecture-narrative-image",
         "architecture-layout",
       ]);
-      const htmlStored = await storeProjectTextAsset(
-        project.id,
-        "architecture-html",
-        "html",
-        html,
-        currentSourceAssetIds(project, ["brief", "repository-evidence", "story"]),
-        { renderer: "copilot-html-css", sandboxed: true },
-      );
-      htmlAssetId = htmlStored.asset.id;
-      const validatedJsonHtmlStored = await storeProjectTextAsset(
-        project.id,
-        "architecture-validated-json-html",
-        "html",
-        validatedJsonHtml,
-        currentSourceAssetIds(project, ["brief", "repository-evidence", "story"]),
-        { renderer: "copilot-html-css", source: "validated-json", sandboxed: true },
-      );
-      validatedJsonHtmlAssetId = validatedJsonHtmlStored.asset.id;
-      const narrativeHtmlStored = await storeProjectTextAsset(
-        project.id,
-        "architecture-narrative-html",
-        "html",
-        narrativeHtml,
-        currentSourceAssetIds(project, ["brief", "repository-evidence", "story"]),
-        { renderer: "copilot-html-css", source: "agent-narrative", sandboxed: true },
-      );
-      narrativeHtmlAssetId = narrativeHtmlStored.asset.id;
-      const imageStored = await storeProjectBinaryAsset(
-        project.id,
-        "architecture-image",
-        "png",
-        image,
-        currentSourceAssetIds(project, ["brief", "repository-evidence", "story"]),
-        { renderer: "foundry-image-model", designed: true },
-      );
-      imageAssetId = imageStored.asset.id;
-      const narrativeImageStored = await storeProjectBinaryAsset(
-        project.id,
-        "architecture-narrative-image",
-        "png",
-        narrativeImage,
-        currentSourceAssetIds(project, ["brief", "repository-evidence"]),
-        { renderer: "foundry-image-model", designed: true, source: "agent-narrative" },
-      );
-      narrativeImageAssetId = narrativeImageStored.asset.id;
+      if (html) {
+        const storedHtml = await storeProjectTextAsset(
+          project.id,
+          "architecture-html",
+          "html",
+          html,
+          currentSourceAssetIds(project, ["brief", "repository-evidence", "outline"]),
+          { renderer: "copilot-html-css", sandboxed: true },
+        );
+        htmlAssetId = storedHtml.asset.id;
+      }
+      if (validatedJsonHtml) {
+        const storedHtml = await storeProjectTextAsset(
+          project.id,
+          "architecture-validated-json-html",
+          "html",
+          validatedJsonHtml,
+          currentSourceAssetIds(project, ["brief", "repository-evidence", "outline"]),
+          { renderer: "copilot-html-css", source: "validated-json", sandboxed: true },
+        );
+        validatedJsonHtmlAssetId = storedHtml.asset.id;
+      }
+      if (imageDerivedHtml) {
+        const storedHtml = await storeProjectTextAsset(
+          project.id,
+          "architecture-image-derived-html",
+          "html",
+          imageDerivedHtml,
+          currentSourceAssetIds(project, ["brief", "repository-evidence", "outline"]),
+          {
+            renderer: "copilot-html-css",
+            source: "gpt-image-2-direct-copilot-attachment",
+            imageDeployment: imageConfiguration.deployment,
+            sandboxed: true,
+          },
+        );
+        imageDerivedHtmlAssetId = storedHtml.asset.id;
+      }
+      if (narrativeHtml) {
+        const storedHtml = await storeProjectTextAsset(
+          project.id,
+          "architecture-narrative-html",
+          "html",
+          narrativeHtml,
+          currentSourceAssetIds(project, ["brief", "repository-evidence", "outline"]),
+          { renderer: "copilot-html-css", source: "agent-narrative", sandboxed: true },
+        );
+        narrativeHtmlAssetId = storedHtml.asset.id;
+      }
+      if (image) {
+        const storedImage = await storeProjectBinaryAsset(
+          project.id,
+          "architecture-image",
+          "png",
+          image,
+          currentSourceAssetIds(project, ["brief", "repository-evidence", "outline"]),
+          {
+            renderer: "foundry-image-model",
+            designed: true,
+            deployment: imageConfiguration.deployment,
+            width: imageConfiguration.width,
+            height: imageConfiguration.height,
+          },
+        );
+        imageAssetId = storedImage.asset.id;
+      }
+      if (narrativeImage) {
+        const storedImage = await storeProjectBinaryAsset(
+          project.id,
+          "architecture-narrative-image",
+          "png",
+          narrativeImage,
+          currentSourceAssetIds(project, ["brief", "repository-evidence"]),
+          {
+            renderer: "foundry-image-model",
+            designed: true,
+            source: "agent-narrative",
+            deployment: imageConfiguration.deployment,
+            width: imageConfiguration.width,
+            height: imageConfiguration.height,
+          },
+        );
+        narrativeImageAssetId = storedImage.asset.id;
+      }
       visual = {
-        mode: "dual",
-        htmlUrl: `/projects/${project.id}/architecture/html`,
-        validatedJsonHtmlUrl:
-          `/projects/${project.id}/architecture/validated-json-html`,
-        narrativeHtmlUrl: `/projects/${project.id}/architecture/narrative-html`,
-        imageUrl: `/projects/${project.id}/architecture/image`,
-        narrativeImageUrl: `/projects/${project.id}/architecture/narrative-image`,
+        mode: "image",
+        ...(imageAssetId
+          ? { imageUrl: `/projects/${project.id}/architecture/image` }
+          : {}),
+        pptxDownloadUrl:
+          `/projects/${project.id}/architecture/download.pptx`,
       };
     } else if (project) {
       await clearCurrentProjectAssets(project.id, [
         "architecture-html",
         "architecture-validated-json-html",
+        "architecture-image-derived-html",
         "architecture-narrative-html",
         "architecture-image",
+        "architecture-pptx",
+        "architecture-pptx-preview",
         "architecture-narrative-image",
         "architecture-layout",
       ]);
@@ -1118,7 +1447,7 @@ router.post("/architecture", async (req, res) => {
           project.id,
           "architecture",
           architecture,
-          currentSourceAssetIds(project, ["brief", "repository-evidence", "story"]),
+          currentSourceAssetIds(project, ["brief", "repository-evidence", "outline"]),
           {
             title: architecture.title,
             layerCount: architecture.layers.length,
@@ -1136,6 +1465,7 @@ router.post("/architecture", async (req, res) => {
             visualMode: visual.mode,
             htmlAssetId,
             validatedJsonHtmlAssetId,
+            imageDerivedHtmlAssetId,
             narrativeHtmlAssetId,
             imageAssetId,
             narrativeImageAssetId,
@@ -1143,13 +1473,63 @@ router.post("/architecture", async (req, res) => {
         )
       : null;
     if (project) {
-      await clearCurrentProjectAssets(project.id, ["slide-model", "slide-deck"]);
+      await clearCurrentProjectAssets(project.id, [
+        "slide-model",
+        "slide-deck",
+        "slide-deck-pptx",
+        "speech-script",
+      ]);
+    }
+    if (project && generateVisuals !== false) {
+      const currentProgress = architectureProgress.get(project.id);
+      const failedCount = currentProgress?.tasks.filter(
+        task => task.status === "failed",
+      ).length || 0;
+      updateArchitectureProgress(project.id, {
+        status: "completed",
+        stage: failedCount > 0
+          ? `${VISUAL_TASKS.length - failedCount}/${VISUAL_TASKS.length} designs ready; ${failedCount} failed`
+          : "Architecture image is ready",
+        percent: 100,
+        ...(failedCount > 0
+          ? {
+              error: currentProgress?.tasks
+                .filter(task => task.status === "failed")
+                .map(task => `${task.label}: ${task.error}`)
+                .join(" | "),
+            }
+          : {}),
+      });
     }
     res.json({ architecture, visual, asset: stored?.asset });
   } catch (error) {
     const enhanced = enhanceModelError(error);
+    if (project && generateVisuals !== false) {
+      updateArchitectureProgress(project.id, {
+        status: "failed",
+        stage: "Architecture generation failed",
+        percent: 100,
+        error: enhanced.message,
+      });
+    }
     res.status(500).json({ error: enhanced.message });
   }
+});
+
+router.get("/projects/:projectId/architecture/progress", (req, res) => {
+  const progress = architectureProgress.get(req.params.projectId);
+  res.json(progress || {
+    status: "idle",
+    stage: "No architecture generation is running",
+    percent: 0,
+    completedTasks: 0,
+    totalTasks: VISUAL_TASKS.length,
+    tasks: VISUAL_TASKS.map(([id, label]) => ({
+      id,
+      label,
+      status: "pending",
+    })),
+  });
 });
 
 router.get("/projects/:projectId/architecture/image", async (req, res) => {
@@ -1160,6 +1540,44 @@ router.get("/projects/:projectId/architecture/image", async (req, res) => {
     : null;
   if (!stored) {
     res.status(404).json({ error: "Generated architecture image not found." });
+    return;
+  }
+  res.setHeader("Content-Type", "image/png");
+  res.setHeader("Cache-Control", "private, max-age=300");
+  res.send(Buffer.from(stored.content));
+});
+
+router.get("/projects/:projectId/architecture/download.pptx", async (req, res) => {
+  const project = await getProject(req.params.projectId);
+  const assetId = project?.currentAssets["architecture-pptx"];
+  const stored = assetId
+    ? await readProjectBinaryAsset(req.params.projectId, assetId)
+    : null;
+  if (!stored) {
+    res.status(404).json({
+      error: "Editable architecture PPTX has not been generated yet.",
+    });
+    return;
+  }
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  );
+  res.setHeader(
+    "Content-Disposition",
+    'attachment; filename="architecture-editable.pptx"',
+  );
+  res.send(Buffer.from(stored.content));
+});
+
+router.get("/projects/:projectId/architecture/pptx-preview", async (req, res) => {
+  const project = await getProject(req.params.projectId);
+  const assetId = project?.currentAssets["architecture-pptx-preview"];
+  const stored = assetId
+    ? await readProjectBinaryAsset(req.params.projectId, assetId)
+    : null;
+  if (!stored) {
+    res.status(404).json({ error: "Editable architecture PPTX preview not found." });
     return;
   }
   res.setHeader("Content-Type", "image/png");
@@ -1208,6 +1626,22 @@ router.get("/projects/:projectId/architecture/validated-json-html", async (req, 
   res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'");
   res.setHeader("Cache-Control", "private, max-age=300");
   res.send(stored.content);
+});
+
+router.get("/projects/:projectId/architecture/image-derived-html", async (req, res) => {
+  const project = await getProject(req.params.projectId);
+  const assetId = project?.currentAssets["architecture-image-derived-html"];
+  const stored = assetId ? await readProjectAsset(req.params.projectId, assetId) : null;
+  if (!stored) {
+    res.status(404).json({ error: "Generated GPT-Image-2-derived HTML not found." });
+    return;
+  }
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; frame-ancestors 'self'",
+  );
+  res.send(applyArchitectureImageLayoutGuard(stored.content));
 });
 
 router.get("/projects/:projectId/architecture/html", async (req, res) => {

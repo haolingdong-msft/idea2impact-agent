@@ -5,7 +5,7 @@ import type { GitHubAuthStatus } from '../hooks/useGitHubAuth'
 interface Props {
   isLoading: boolean
   onSubmit: (brief: PresentationBrief) => void
-  onQuickGenerate?: (brief: PresentationBrief) => void
+  onQuickTest?: (brief: PresentationBrief) => void
   githubStatus?: GitHubAuthStatus
   onGitHubLogout?: () => void
 }
@@ -21,7 +21,7 @@ const INITIAL_BRIEF: PresentationBrief = {
 export function IdeaBrief({
   isLoading,
   onSubmit,
-  onQuickGenerate,
+  onQuickTest,
   githubStatus,
   onGitHubLogout,
 }: Props) {
@@ -135,17 +135,21 @@ export function IdeaBrief({
       <div className="brief-actions">
         <span>Only the idea is required. Repository access is read-only.</span>
         <button className="primary-button" disabled={isLoading || brief.idea.trim().length < 10}>
-          {isLoading ? 'Starting conversation...' : 'Start story'}
+          {isLoading ? 'Starting conversation...' : 'Start outline'}
           <span aria-hidden="true">-&gt;</span>
         </button>
-        {onQuickGenerate && (
+        {onQuickTest && (
           <button
             type="button"
             className="secondary-button"
-            disabled={isLoading || brief.idea.trim().length < 10}
-            onClick={() => onQuickGenerate(normalizedBrief())}
+            disabled={
+              isLoading ||
+              brief.idea.trim().length < 10 ||
+              !brief.repositoryUrl?.trim()
+            }
+            onClick={() => onQuickTest(normalizedBrief())}
           >
-            {isLoading ? 'Generating...' : 'Quick generate slides'}
+            {isLoading ? 'Running quick test...' : 'Quick test: generate slides'}
           </button>
         )}
       </div>
