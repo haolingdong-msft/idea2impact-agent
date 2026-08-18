@@ -6,7 +6,7 @@ ENV PUPPETEER_SKIP_DOWNLOAD=true
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
-COPY tsconfig.json index.ts model-config.ts client.ts presentation-instructions.ts ./
+COPY tsconfig.json *.ts ./
 COPY routes/ ./routes/
 RUN pnpm exec tsc && pnpm prune --prod
 

@@ -1,4 +1,5 @@
 import express from "express";
+import { createHash } from "node:crypto";
 import request from "supertest";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
@@ -8,8 +9,16 @@ vi.mock("./model-config.js", () => ({
   enhanceModelError: vi.fn((error: unknown) =>
     error instanceof Error ? error : new Error(String(error))),
 }));
+vi.mock("./editable-ppt-skill.js", () => ({
+  convertImageToEditablePpt: vi.fn(),
+  convertImagesToEditablePpt: vi.fn(),
+}));
 
 import { getClient } from "./client.js";
+import {
+  convertImageToEditablePpt,
+  convertImagesToEditablePpt,
+} from "./editable-ppt-skill.js";
 import { app } from "./index.js";
 
 function oneShot(content: string) {
@@ -87,7 +96,135 @@ describe("Foundry invocations adapter", () => {
     expect(response.body.error).toContain("Unsupported invocation version");
   });
 
-  it("streams chat deltas", async () => {
+  it("invokes the deployed image-to-editable-ppt worker", async () => {
+      const image = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01,
+      ]);
+      const sourceImageSha256 = createHash("sha256").update(image).digest("hex");
+      (convertImageToEditablePpt as Mock).mockResolvedValue({
+        invocationId: "skill-invocation-123",
+        runId: "editppt-run-456",
+        workflow: "image-to-editable-ppt",
+        validationPassed: true,
+        sourceImageSha256,
+        pptxBase64: Buffer.from("PK skill result").toString("base64"),
+      });
+
+      const response = await request(app).post("/invocations").send({
+        version: "1.0",
+        operation: "image-to-editable-ppt",
+        input: {
+          projectId: "project-1",
+          sourceAssetId: "image-1",
+          sourceImageBase64: image.toString("base64"),
+          sourceImageSha256,
+        },
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        invocationId: "skill-invocation-123",
+        runId: "editppt-run-456",
+        workflow: "image-to-editable-ppt",
+        validationPassed: true,
+      });
+      expect(convertImageToEditablePpt).toHaveBeenCalledWith({
+        projectId: "project-1",
+        sourceAssetId: "image-1",
+        sourceImageBase64: image.toString("base64"),
+        sourceImageSha256,
+      });
+    });
+
+    it("invokes the multi-page editable PPT skill worker", async () => {
+      const image = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01,
+      ]);
+      const sourceImageSha256 = createHash("sha256").update(image).digest("hex");
+      (convertImagesToEditablePpt as Mock).mockResolvedValue({
+        invocationId: "deck-skill-invocation",
+        runId: "editppt-deck-run",
+        workflow: "image-to-editable-ppt",
+        validationPassed: true,
+        sourceImageSha256s: [sourceImageSha256, sourceImageSha256],
+        pptxBase64: Buffer.from("PK skill deck").toString("base64"),
+      });
+
+      const sourceImages = ["image-1", "image-2"].map(sourceAssetId => ({
+        sourceAssetId,
+        sourceImageBase64: image.toString("base64"),
+        sourceImageSha256,
+      }));
+      const response = await request(app).post("/invocations").send({
+        version: "1.0",
+        operation: "images-to-editable-ppt",
+        input: { projectId: "project-1", sourceImages },
+      });
+
+      expect(response.status).toBe(200);
+      expect(convertImagesToEditablePpt).toHaveBeenCalledWith(
+        sourceImages.map(source => ({ projectId: "project-1", ...source })),
+      );
+      expect(response.body.sourceImageSha256s).toEqual([
+        sourceImageSha256,
+        sourceImageSha256,
+      ]);
+    });
+
+    it("runs multi-page editable PPT conversion as a pollable job", async () => {
+      const image = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01,
+      ]);
+      const sourceImageSha256 = createHash("sha256").update(image).digest("hex");
+      let complete!: (value: unknown) => void;
+      (convertImagesToEditablePpt as Mock).mockImplementation(
+        () => new Promise(resolve => {
+          complete = resolve;
+        }),
+      );
+      const sourceImages = [{
+        sourceAssetId: "image-1",
+        sourceImageBase64: image.toString("base64"),
+        sourceImageSha256,
+      }];
+      const started = await request(app).post("/invocations").send({
+        version: "1.0",
+        operation: "start-images-to-editable-ppt",
+        input: { projectId: "project-1", sourceImages },
+      });
+
+      expect(started.status).toBe(202);
+      expect(started.body.status).toBe("running");
+      const running = await request(app).post("/invocations").send({
+        version: "1.0",
+        operation: "editable-ppt-status",
+        input: { jobId: started.body.jobId },
+      });
+      expect(running.status).toBe(202);
+
+      complete({
+        invocationId: "async-invocation",
+        runId: "async-run",
+        workflow: "image-to-editable-ppt",
+        validationPassed: true,
+        sourceImageSha256s: [sourceImageSha256],
+        pptxBase64: Buffer.from("PK async deck").toString("base64"),
+      });
+      await new Promise(resolve => setTimeout(resolve, 0));
+      const completed = await request(app).post("/invocations").send({
+        version: "1.0",
+        operation: "editable-ppt-status",
+        input: { jobId: started.body.jobId },
+      });
+      expect(completed.status).toBe(200);
+      expect(completed.body).toMatchObject({
+        status: "completed",
+        invocationId: "async-invocation",
+        validationPassed: true,
+      });
+    });
+
+    it("streams chat deltas", async () => {
     const session = streaming(["Hello", " world"]);
     (getClient as Mock).mockResolvedValue({
       createSession: vi.fn().mockResolvedValue(session),
@@ -118,10 +255,10 @@ describe("Foundry invocations adapter", () => {
       operation: "chat",
       requestId: "request-repository-story",
       input: {
-        message: "Build a presentation agent.",
+        message: "Build Idea2Impact Agent.",
         history: [],
         repositoryEvidence: JSON.stringify({
-          files: [{ path: "README.md", excerpt: "Presentation agent" }],
+          files: [{ path: "README.md", excerpt: "Idea2Impact Agent" }],
         }),
       },
     });
@@ -180,6 +317,9 @@ describe("Foundry invocations adapter", () => {
     expect(prompt).toContain('"toolings"');
     expect(prompt).toContain('"platformCalls"');
     expect(prompt).toContain('"toolingId"');
+    expect(prompt).toContain("model GitHub as a platform");
+    expect(prompt).toContain("GitHub Copilot SDK as its own component");
+    expect(prompt).toContain("directional connection from");
     expect(session.destroy).toHaveBeenCalledOnce();
   });
 
@@ -196,9 +336,9 @@ describe("Foundry invocations adapter", () => {
       version: "1.0",
       operation: "outline",
       input: {
-        brief: { idea: "Build a presentation agent." },
+        brief: { idea: "Build Idea2Impact Agent." },
         currentOutline: {},
-        conversation: "user: Build a presentation agent.",
+        conversation: "user: Build Idea2Impact Agent.",
       },
     });
     expect(response.status).toBe(200);
@@ -206,9 +346,22 @@ describe("Foundry invocations adapter", () => {
     const prompt = session.sendAndWait.mock.calls[0][0].prompt;
     expect(prompt).toContain("problemStatement");
     expect(prompt).toContain("CURRENT OUTLINE");
-    expect(prompt).toContain("automatically summarize the codebase");
+    expect(prompt).toContain("automatically summarize the product");
     expect(prompt).toContain("repository evidence is absent");
     expect(prompt).toContain("complete initial version");
+    expect(prompt).toContain(
+      "Solution may use up to three short sentences or 75 words",
+    );
+    expect(prompt).toContain("Never include source");
+    expect(prompt).toContain(
+      "Experience,\nCapabilities, Platforms, Integrations, and Constraints",
+    );
+    expect(prompt).toContain(
+      "name the material platforms and their key",
+    );
+    expect(prompt).toContain(
+      "Hosted Agent calls the GitHub Copilot SDK component",
+    );
     expect(prompt).not.toContain("approve each");
   });
 
@@ -253,6 +406,38 @@ describe("Foundry invocations adapter", () => {
     expect(session.destroy).toHaveBeenCalledOnce();
   });
 
+  it("uses streamed structured JSON when the final message is empty", async () => {
+    const handlers: Record<string, ((event: unknown) => void)[]> = {};
+    const session = {
+      on: vi.fn((event: string, callback: (event: unknown) => void) => {
+        handlers[event] ??= [];
+        handlers[event].push(callback);
+        return () => undefined;
+      }),
+      send: vi.fn(async () => {
+        handlers["assistant.message_delta"]?.forEach(callback =>
+          callback({ data: { deltaContent: '{"problemStatement":"Problem",' } }));
+        handlers["assistant.message_delta"]?.forEach(callback =>
+          callback({ data: { deltaContent: '"userScenarios":"Scenario","solution":"Solution"}' } }));
+        handlers["assistant.message"]?.forEach(callback =>
+          callback({ data: { content: "" } }));
+      }),
+      destroy: vi.fn().mockResolvedValue(undefined),
+    };
+    (getClient as Mock).mockResolvedValue({
+      createSession: vi.fn().mockResolvedValue(session),
+    });
+
+    const response = await request(app).post("/invocations").send({
+      version: "1.0",
+      operation: "outline",
+      input: { brief: { idea: "Idea2Impact Agent" } },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.result.content).toContain('"problemStatement":"Problem"');
+  });
+
   it("creates a concise prose architecture brief for image generation", async () => {
     const session = oneShot("Web UI sends HTTPS requests to the Presentation API.");
     (getClient as Mock).mockResolvedValue({
@@ -262,7 +447,7 @@ describe("Foundry invocations adapter", () => {
       version: "1.0",
       operation: "architecture-brief",
       input: {
-        idea: "Build a presentation agent from a user idea and repository.",
+        idea: "Build Idea2Impact Agent from a user idea and repository.",
         repositoryEvidence: "README: Web UI calls an API.",
       },
     });
@@ -324,7 +509,7 @@ describe("Foundry invocations adapter", () => {
     expect(message.attachments).toEqual([
       expect.objectContaining({
         type: "file",
-        displayName: "GPT-Image-2 architecture reference.png",
+        displayName: "GPT-Image-2 project overview reference.png",
       }),
     ]);
   });
@@ -385,5 +570,43 @@ describe("Foundry invocations adapter", () => {
     });
     expect(response.status).toBe(400);
     expect(response.body.error).toContain("Slides require");
+  });
+
+  it("keeps hosted slide content scoped to each approved section", async () => {
+    const session = oneShot(JSON.stringify({
+      title: "Focused deck",
+      subtitle: "Focused content",
+      theme: "azure",
+      slides: [],
+    }));
+    (getClient as Mock).mockResolvedValue({
+      createSession: vi.fn().mockResolvedValue(session),
+    });
+
+    const response = await request(app).post("/invocations").send({
+      version: "1.0",
+      operation: "slides",
+      input: {
+        brief: { idea: "Create a presentation" },
+        outline: {
+          problemStatement: "Users lose context.",
+          userScenarios: "A presenter follows a guided journey.",
+          solution: "A service generates presentation assets.",
+        },
+        architecture: { platforms: [{ label: "Microsoft Foundry" }] },
+      },
+    });
+
+    expect(response.status).toBe(200);
+    const prompt = session.sendAndWait.mock.calls[0][0].prompt;
+    expect(prompt).toContain(
+      "problem slides discuss only user pain, context, impact, scope, and desired",
+    );
+    expect(prompt).toContain(
+      "user-scenarios slides discuss only actors, goals, journeys, decisions, edge",
+    );
+    expect(prompt).toContain(
+      "Architecture input is supporting evidence for solution slides only.",
+    );
   });
 });

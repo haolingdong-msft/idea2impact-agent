@@ -13,29 +13,42 @@ vi.mock("../model-config.js", () => ({
     error instanceof Error ? error : new Error(String(error))),
 }));
 
-vi.mock("./pptx-export.js", () => ({
-  exportHtmlToEditablePptx: vi.fn().mockResolvedValue(
-    Buffer.from("PK editable pptx"),
-  ),
+vi.mock("../hosted-agent-client.js", () => ({
+  invokeHostedAgent: vi.fn(),
+  invokeHostedStructured: vi.fn(),
+  isHostedAgentConfigured: vi.fn(() => false),
+}));
+
+vi.mock("../architecture-visual.js", () => ({
+  generateArchitectureImage: vi.fn()
+    .mockResolvedValue(new Uint8Array(Buffer.from("generated-slide-image"))),
+  isArchitectureImageConfigured: vi.fn(() => true),
 }));
 
 import { getClient } from "../client.js";
-import { exportHtmlToEditablePptx } from "./pptx-export.js";
+import {
+  invokeHostedAgent,
+  isHostedAgentConfigured,
+} from "../hosted-agent-client.js";
+import { generateArchitectureImage } from "../architecture-visual.js";
 import type { ArchitectureGraph } from "./architecture.js";
 import {
   createProject,
+  getProject,
   projectDirectory,
+  readProjectBinaryAsset,
   storeProjectJsonAsset,
   storeProjectTextAsset,
 } from "./project-store.js";
 import slideRoutes, {
+  buildSlideImagePrompt,
   renderSlideDeckHtml,
   validateSlideDeck,
   type SlideDeck,
 } from "./slides.js";
 
 const GRAPH: ArchitectureGraph = {
-  title: "Presentation Agent Architecture",
+  title: "Idea2Impact Agent Architecture",
   summary: "A guided workflow creates presentation assets.",
   layers: [
     {
@@ -133,18 +146,10 @@ const GRAPH: ArchitectureGraph = {
 };
 
 const DECK: SlideDeck = {
-  title: "Presentation Agent",
+  title: "Idea2Impact Agent",
   subtitle: "From idea to polished presentation assets.",
   theme: "azure",
   slides: [
-    {
-      id: "opening",
-      kind: "title",
-      eyebrow: "Presentation Agent",
-      title: "Build the story once",
-      subtitle: "Carry approved context through every step.",
-      bullets: [],
-    },
     {
       id: "problem",
       kind: "problem",
@@ -169,14 +174,20 @@ const DECK: SlideDeck = {
       subtitle: "",
       bullets: ["One approved outline grounds architecture, slides, and speaker notes."],
     },
+  ],
+};
+
+const FLEXIBLE_DECK: SlideDeck = {
+  ...DECK,
+  slides: [
+    DECK.slides[0],
     {
-      id: "system",
-      kind: "architecture",
-      eyebrow: "Architecture",
-      title: "Assets flow through one workspace",
-      subtitle: "The approved graph remains the source of truth.",
-      bullets: [],
+      ...DECK.slides[0],
+      id: "problem-impact",
+      title: "The impact compounds",
+      bullets: ["Rework grows every time presentation context is copied."],
     },
+    ...DECK.slides.slice(1),
   ],
 };
 
@@ -197,14 +208,27 @@ afterEach(async () => {
 describe("slide generation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(isHostedAgentConfigured).mockReturnValue(false);
   });
 
   it("validates required outline slides", () => {
-    expect(validateSlideDeck(DECK).slides).toHaveLength(5);
+    expect(validateSlideDeck(DECK).slides).toHaveLength(3);
+    expect(validateSlideDeck({
+      ...DECK,
+      slides: [
+        DECK.slides[0],
+        {
+          ...DECK.slides[0],
+          id: "problem-impact",
+          title: "The impact compounds",
+        },
+        ...DECK.slides.slice(1),
+      ],
+    }).slides).toHaveLength(4);
     expect(() => validateSlideDeck({
       ...DECK,
-      slides: DECK.slides.filter(slide => slide.kind !== "architecture"),
-    })).toThrow("between 5 and 8");
+      slides: DECK.slides.filter(slide => slide.kind !== "solution"),
+    })).toThrow("between 3 and 5");
   });
 
   it("escapes generated HTML content", () => {
@@ -214,41 +238,71 @@ describe("slide generation", () => {
     }, GRAPH);
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(html).not.toContain("<script>alert(1)</script>");
-    expect(html).toContain("GitHub Copilot SDK");
-    expect(html).toContain("HTTPS JSON");
-    expect(html).toContain("approved story context");
+    expect(html).toContain("Presentation workflows lose context");
   });
 
-  it("renders editable SVG or a self-contained pixel fallback", () => {
-    const layout = {
-      width: 1600 as const,
-      height: 900 as const,
-      nodes: [
-        { id: "workspace", x: 100, y: 200, width: 300, height: 150 },
-        { id: "copilot", x: 800, y: 200, width: 300, height: 150 },
-      ],
-      connections: [{
-        from: "workspace",
-        to: "copilot",
-        points: [{ x: 400, y: 275 }, { x: 800, y: 275 }],
-        labelX: 600,
-        labelY: 250,
-      }],
-    };
-    const editable = renderSlideDeckHtml(DECK, GRAPH, { layout });
-    expect(editable).toContain("architecture-generated-svg");
-    expect(editable).toContain("generate architecture");
-
-    const raster = renderSlideDeckHtml(DECK, GRAPH, {
-      imageDataUrl: "data:image/png;base64,cG5n",
+  it("renders every generated image as a complete slide", () => {
+    const html = renderSlideDeckHtml(DECK, GRAPH, {
+      slideImages: {
+        problem: "data:image/png;base64,cHJvYmxlbQ==",
+        journey: "data:image/png;base64,dXNlcg==",
+        solution: "data:image/png;base64,c29sdXRpb24=",
+      },
     });
-    expect(raster).toContain("data:image/png;base64,cG5n");
-    expect(raster).toContain("architecture-image");
+    expect(html.match(/<div class="slide-story-image">/g)).toHaveLength(3);
+    expect(html.match(/slide-has-story-image/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(html).toContain(
+      ".slide-has-story-image .slide-story-layout{display:block;width:100vw;height:100vh",
+    );
+    expect(html).toContain("data:image/png;base64,cHJvYmxlbQ==");
+    expect(html).not.toContain("<ul>");
+  });
+
+  it("keeps image prompts strictly focused on their slide section", () => {
+    const overviewGrounding =
+      "Web Workspace (React): Hosts the workflow; Copilot SDK: Generates assets.";
+    const problemPrompt = buildSlideImagePrompt({
+      slide: DECK.slides[0],
+      approvedSection: "Teams lose time rebuilding presentation context.",
+      visualPoints: ["Teams lose time rebuilding presentation context."],
+      overviewGrounding,
+    });
+    const scenarioPrompt = buildSlideImagePrompt({
+      slide: DECK.slides[1],
+      approvedSection: "Presenters refine one guided journey.",
+      visualPoints: ["Presenters refine one guided journey."],
+      overviewGrounding,
+    });
+    const solutionPrompt = buildSlideImagePrompt({
+      slide: DECK.slides[2],
+      approvedSection: "A Copilot workflow creates presentation assets.",
+      visualPoints: ["A Copilot workflow creates presentation assets."],
+      overviewGrounding,
+    });
+
+    expect(problemPrompt).toContain(
+      "Focus only on user pain, context, impact, scope, and desired outcome.",
+    );
+    expect(scenarioPrompt).toContain(
+      "Focus only on actors, goals, journeys, decisions, edge cases, and user value.",
+    );
+    for (const prompt of [problemPrompt, scenarioPrompt]) {
+      expect(prompt).toContain(
+        "Do not depict or name platforms, architecture, components, deployment",
+      );
+      expect(prompt).not.toContain("APPROVED OVERVIEW COMPONENTS:");
+      expect(prompt).not.toContain("Web Workspace (React)");
+    }
+    expect(solutionPrompt).toContain(
+      "You may depict capabilities, architecture, platforms, components",
+    );
+    expect(solutionPrompt).toContain("APPROVED OVERVIEW COMPONENTS:");
+    expect(solutionPrompt).toContain("Web Workspace (React)");
   });
 
   it("generates and stores HTML slides with asset lineage", async () => {
     const project = await createProject({
-      title: "Presentation Agent",
+      title: "Idea2Impact Agent",
       idea: "Create architecture and slides in one guided workflow.",
       audience: "Engineering leaders",
       purpose: "Approve the implementation",
@@ -259,7 +313,8 @@ describe("slide generation", () => {
       "outline",
       {
         problemStatement: "Teams lose time rebuilding presentation context.",
-        userScenarios: "Presenters refine one outline and generate reusable assets.",
+        userScenarios:
+          "A presenter submits an idea and repository, reviews the generated overview and slide narrative, then works with an engineer to refine edge cases before final approval.",
         solution: "A Copilot workflow creates architecture, slides, and speaker notes.",
         status: "approved",
         approvedAt: "2026-08-11T00:00:00.000Z",
@@ -281,7 +336,7 @@ describe("slide generation", () => {
     );
     const session = {
       sendAndWait: vi.fn().mockResolvedValue({
-        data: { content: JSON.stringify(DECK) },
+        data: { content: JSON.stringify(FLEXIBLE_DECK) },
       }),
       destroy: vi.fn().mockResolvedValue(undefined),
     };
@@ -293,8 +348,61 @@ describe("slide generation", () => {
       .post("/slides")
       .send({ projectId: project.id, architectureVisualMode: "image-html" });
 
-    expect(response.status).toBe(201);
-    expect(response.body.deck.slides).toHaveLength(5);
+    expect(response.status, response.body.error).toBe(201);
+    expect(response.body.deck.slides).toHaveLength(4);
+    expect(response.body.deck.slides.every(
+      (slide: { imageUrl?: string }) => Boolean(slide.imageUrl),
+    )).toBe(true);
+    expect(generateArchitectureImage).toHaveBeenCalledTimes(4);
+    const imagePrompts = vi.mocked(generateArchitectureImage).mock.calls
+      .map(([prompt]) => prompt);
+    expect(imagePrompts[0]).toContain(
+      "APPROVED SECTION (verbatim):\nTeams lose time rebuilding presentation context.",
+    );
+    expect(imagePrompts[2]).toContain(
+      "APPROVED SECTION (verbatim):\nA presenter submits an idea and repository, " +
+      "reviews the generated overview and slide narrative, then works with an " +
+      "engineer to refine edge cases before final approval.",
+    );
+    expect(imagePrompts[3]).toContain(
+      "APPROVED SECTION (verbatim):\nA Copilot workflow creates architecture, slides, and speaker notes.",
+    );
+    expect(imagePrompts.every(prompt =>
+      prompt.includes("Do not add generic presentation imagery"))).toBe(true);
+    expect(imagePrompts[0]).toContain(
+      "Do not depict or name platforms, architecture, components, deployment",
+    );
+    expect(imagePrompts[2]).toContain(
+      "Do not depict or name platforms, architecture, components, deployment",
+    );
+    expect(imagePrompts[0]).not.toContain("APPROVED OVERVIEW COMPONENTS:");
+    expect(imagePrompts[2]).not.toContain("APPROVED OVERVIEW COMPONENTS:");
+    expect(imagePrompts[3]).toContain("APPROVED OVERVIEW COMPONENTS:");
+    const deckPrompt = session.sendAndWait.mock.calls[0][0].prompt;
+    expect(deckPrompt).toContain(
+      "problem slides discuss only user pain, context, impact, scope, and desired",
+    );
+    expect(deckPrompt).toContain(
+      "user-scenarios slides discuss only actors, goals, journeys, decisions, edge",
+    );
+    expect(deckPrompt).toContain(
+      "Architecture input is supporting evidence for solution slides only.",
+    );
+    expect(imagePrompts[0]).toContain("TEXT TO RENDER VERBATIM:");
+    expect(imagePrompts[0]).toContain(
+      "1. Teams lose time rebuilding presentation context.",
+    );
+    expect(response.body.deck.slides[0].visualPoints).toEqual([
+      "Teams lose time rebuilding presentation context.",
+    ]);
+    expect(response.body.deck.slides[2].visualPoints).toEqual([
+      "A presenter submits an idea and repository, reviews the generated overview " +
+      "and slide narrative, then works with an engineer to refine edge cases before " +
+      "final approval.",
+    ]);
+    expect(response.body.deck.slides[3].visualPoints).toEqual([
+      "A Copilot workflow creates architecture, slides, and speaker notes.",
+    ]);
     expect(response.body.assets.model.type).toBe("slide-model");
     expect(response.body.assets.html.type).toBe("slide-deck");
     expect(response.body.assets.html.sourceAssetIds).toContain(
@@ -311,30 +419,66 @@ describe("slide generation", () => {
       .get(`/projects/${project.id}/slides/preview`);
     expect(preview.status).toBe(200);
     expect(preview.headers["content-type"]).toContain("text/html");
-    expect(preview.text).toContain("Image-derived option six");
-    expect(preview.text).toContain("architecture-html-embed");
-    expect(preview.text).toContain("@scope (.architecture-html-embed)");
+    expect(preview.text).toContain("Presentation workflows lose context");
     expect(preview.text).not.toContain("<iframe");
     expect(preview.text).not.toContain("srcdoc=");
-    expect(preview.text).toContain("overflow:hidden!important;contain:layout paint");
-    expect(preview.text).toContain("slide-architecture-canvas");
-    expect(preview.text).toContain("width:100vw;height:100vh");
+    expect(preview.text).toContain("slide-story-layout");
+    expect(preview.text).toContain("slide-has-story-image");
+    expect(preview.text).toContain(
+      ".slide-has-story-image .slide-story-layout{display:block;width:100vw;height:100vh",
+    );
+    expect(preview.text).not.toContain("<ul>");
     expect(session.destroy).toHaveBeenCalledOnce();
 
+    const projectBeforePptx = await getProject(project.id);
+    expect(projectBeforePptx?.currentAssets).toMatchObject({
+      "slide-model": expect.any(String),
+      "slide-image-problem": expect.any(String),
+      "slide-image-problem-impact": expect.any(String),
+      "slide-image-journey": expect.any(String),
+      "slide-image-solution": expect.any(String),
+    });
     const pptx = await request(createApp())
       .get(`/projects/${project.id}/slides/download.pptx`);
-    expect(pptx.status).toBe(200);
+    expect(pptx.status, pptx.text).toBe(200);
     expect(pptx.headers["content-type"]).toBe(
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     );
     expect(pptx.headers["content-disposition"]).toContain(
-      'filename="presentation-slides-editable.pptx"',
+      'filename="presentation-slides.pptx"',
     );
-    expect(exportHtmlToEditablePptx).toHaveBeenCalledOnce();
+    const storedProject = await getProject(project.id);
+    const storedPptx = storedProject?.assets.find(
+      asset => asset.id === storedProject.currentAssets["slide-deck-pptx"],
+    );
+    expect(storedPptx?.metadata).toMatchObject({
+      conversionWorkflow: "full-slide-images",
+      editable: false,
+      fullSlideScreenshot: true,
+      slideCount: 4,
+    });
+    expect(storedPptx?.sourceAssetIds).toEqual(expect.arrayContaining([
+      response.body.assets.model.id,
+      expect.any(String),
+    ]));
+    const storedPptxContent = storedPptx
+      ? await readProjectBinaryAsset(project.id, storedPptx.id)
+      : null;
+    expect(Buffer.from(storedPptxContent!.content).subarray(0, 2).toString())
+      .toBe("PK");
 
-    const cachedPptx = await request(createApp())
-      .get(`/projects/${project.id}/slides/download.pptx`);
-    expect(cachedPptx.status).toBe(200);
-    expect(exportHtmlToEditablePptx).toHaveBeenCalledOnce();
+    const problemImage = await request(createApp())
+      .get(`/projects/${project.id}/slides/problem/image`);
+    expect(problemImage.status).toBe(200);
+    expect(problemImage.headers["content-type"]).toBe("image/png");
+    const impactImage = await request(createApp())
+      .get(`/projects/${project.id}/slides/problem-impact/image`);
+    expect(impactImage.status).toBe(200);
+    expect(storedPptx?.sourceAssetIds).toEqual(expect.arrayContaining([
+      storedProject?.currentAssets["slide-image-problem"],
+      storedProject?.currentAssets["slide-image-problem-impact"],
+      storedProject?.currentAssets["slide-image-journey"],
+      storedProject?.currentAssets["slide-image-solution"],
+    ]));
   });
 });

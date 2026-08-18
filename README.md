@@ -16,25 +16,26 @@ products:
   - ai-services
   - github
 urlFragment: copilot-sdk-service
-name: Presentation Agent — Story, Architecture, Slides, and Video with GitHub Copilot SDK
-description: A full-stack TypeScript application that turns one approved outline into traceable architecture, slides, speaker notes, and refined demo video.
+name: idea2Impact Agent — Outline, Project Overview, Slides, Speech, and Video with GitHub Copilot SDK
+description: A full-stack TypeScript application that turns one approved outline into a traceable project overview, slides, speaker notes, and refined demo video.
 ---
 <!-- YAML front-matter schema: https://review.learn.microsoft.com/en-us/help/contribute/samples/process/onboarding?branch=main#supported-metadata-fields-for-readmemd -->
 
-# Presentation Agent — HTML Architecture Workspace
+# idea2Impact Agent
 
 [![Open in GitHub Codespaces](https://img.shields.io/static/v1?style=for-the-badge&label=GitHub+Codespaces&message=Open&color=brightgreen&logo=github)](https://codespaces.new/azure-samples/copilot-sdk-service)
 [![Open in Dev Container](https://img.shields.io/static/v1?style=for-the-badge&label=Dev+Containers&message=Open&color=blue&logo=visualstudiocode)](https://vscode.dev/redirect?url=vscode://ms-vscode-remote.remote-containers/cloneInVolume?url=https://github.com/azure-samples/copilot-sdk-service)
 
-An architecture-first presentation workspace built with the
+An idea-to-impact presentation workspace built with the
 [GitHub Copilot SDK](https://github.com/github/copilot-sdk), Express, React, and
 TypeScript. Users describe an idea and can optionally provide a GitHub repository.
 Copilot summarizes repository evidence and conversationally refines the Problem
 Statement, User Scenarios, and Solution in one central editable outline. Direct
 edits autosave, and the user approves the complete outline once. Copilot then
-creates five architecture options, a presentation-ready HTML slide deck, and
-editable speaker notes from the same approved context. A filesystem project
-manifest records the brief, outline revisions, architecture, slide model,
+creates a validated project overview, a content-sized presentation deck,
+editable PowerPoint exports, and editable text-only speaker notes from the same
+approved context. A filesystem project
+manifest records the brief, outline revisions, project overview, slide model,
 speaker notes, generated HTML, and source-asset lineage. Users then upload and
 preserve an existing demo recording before conservatively accelerating frozen/silent
 ranges, improve perceived picture clarity, preview the result, and download a new
@@ -79,7 +80,7 @@ azd init --template Azure-Samples/copilot-sdk-service
 azd up
 ```
 
-### Application Architecture
+### Project Overview
 
 This application utilizes the following Azure resources:
 
@@ -89,7 +90,7 @@ This application utilizes the following Azure resources:
 - [**Azure Monitor**](https://docs.microsoft.com/azure/azure-monitor/) for monitoring and logging
 - [**Azure OpenAI**](https://docs.microsoft.com/azure/ai-services/openai/) *(optional)* for Bring Your Own Model (BYOM)
 
-Here's a high level architecture diagram that illustrates these components. Notice that these are all contained within a single [resource group](https://docs.microsoft.com/azure/azure-resource-manager/management/manage-resource-groups-portal), that will be created for you when you create the resources.
+Here's a high-level project overview that illustrates these components. They are all contained within a single [resource group](https://docs.microsoft.com/azure/azure-resource-manager/management/manage-resource-groups-portal), created when you provision the resources.
 
 > This template provisions resources to an Azure subscription that you will select upon provisioning them. Please refer to the [Pricing calculator for Microsoft Azure](https://azure.microsoft.com/pricing/calculator/) and, if needed, update the included Azure resource definitions found in `infra/main.bicep` to suit your needs.
 
@@ -98,27 +99,23 @@ Here's a high level architecture diagram that illustrates these components. Noti
 The template is structured to follow the [Azure Developer CLI](https://aka.ms/azure-dev/overview) conventions. You can learn more about `azd` architecture in [the official documentation](https://learn.microsoft.com/azure/developer/azure-developer-cli/make-azd-compatible?pivots=azd-create#understand-the-azd-architecture).
 
 - **Backend** (`src/api/`) — Express API with project manifests, versioned outline
-  drafts and approval, streaming collaboration chat, validated architecture,
-  slides, speaker-note generation, stored HTML deck preview/download, separate
-  recording upload, and FFmpeg/FFprobe refinement.
+  drafts and approval, streaming collaboration chat, validated project overview,
+  slide visuals, variable-length HTML and image-based PPTX export, speaker-note
+  generation, separate recording upload, and FFmpeg/FFprobe refinement.
 - **Frontend** (`src/web/`) — React workspace with guided idea intake, workflow
-  Q&A, a central autosaved outline with one approval, responsive HTML/CSS
-  architecture and slide rendering, editable speaker notes, deck preview/download,
-  and non-destructive video refinement controls.
+  Q&A, a central autosaved outline with one approval, project overview and slide
+  previews, editable speaker notes, HTML/PPTX downloads, and non-destructive
+  video refinement controls.
 
 The implemented path is:
 
 **Describe idea/codebase → Refine outline → Review/edit summary → Approve outline
 → Generate slides → Generate speaker notes → Upload recording → Refine recording**
 
-For manual smoke testing, entering a GitHub repository URL also enables
-**Quick test: generate slides**. It scans the repository, generates and locks the
-initial codebase-grounded outline revision, then creates architecture visuals and
-slides in one run. The canonical workflow still uses the editable outline and
-explicit approval step.
-
-HTML slide generation is the required initial format; `.pptx` remains an optional
-future export.
+The generated deck covers Problem Statement, User Scenarios, and Solution using
+as many slides as the content needs, and is available as HTML and an image-based
+`.pptx` with one full-slide PNG per page. Object-level editable slide conversion
+is deferred. A separate editable project overview `.pptx` remains available.
 
 Video uploads are streamed to isolated, random job folders instead of being held
 in memory. The source and refined output remain separate, expired jobs are
@@ -161,6 +158,43 @@ Configure via environment variables: `MODEL_PROVIDER`, `MODEL_NAME`, `AZURE_OPEN
 
 ### Local and Hosted Agent Routing
 
+In Azure, the Presentation API does not call the Copilot model directly. It
+invokes the Microsoft Foundry Hosted Agent, whose Node.js container creates
+GitHub Copilot SDK sessions:
+
+```text
+Browser
+  -> Presentation API
+  -> Microsoft Foundry Hosted Agent
+  -> GitHub Copilot SDK component
+  -> GitHub Copilot model service
+```
+
+`src/api/hosted-agent-client.ts` implements the API-to-Foundry call.
+`src/hosted-agent/client.ts` creates the `CopilotClient`, and
+`src/hosted-agent/index.ts` translates Foundry invocation requests into Copilot
+SDK session calls. The Hosted Agent is therefore the hosted orchestration
+runtime, not the model.
+
+In generated project overviews, the required modeling is:
+
+- **GitHub** is the platform.
+- **GitHub Copilot SDK** is a component assigned to the GitHub platform.
+- **Microsoft Foundry Hosted Agent** is a separate component that calls the
+  GitHub Copilot SDK component.
+
+The approved **Solution** outline also summarizes this information in prose: it
+names the material platforms, their key toolings/components, and the high-level
+directional calls between them rather than listing capabilities alone.
+
+For structured operations, the Hosted Agent returns a JSON **candidate**. The
+Presentation API extracts and parses that content, runs an operation-specific
+validator, and stores it only after validation succeeds. Invalid output receives
+one bounded repair attempt using validator feedback; a second failure is
+returned as an error. See
+[`docs/foundry-hosted-agent-architecture.md`](docs/foundry-hosted-agent-architecture.md#how-structured-json-becomes-validated-json)
+for the complete flow and architecture-graph validation rules.
+
 Local development uses the API's local Copilot SDK sessions by default, even if
 `PRESENTATION_AGENT_INVOCATIONS_ENDPOINT` is present in the selected azd
 environment. This path does not require a Foundry role assignment.
@@ -193,7 +227,7 @@ cd src/api && pnpm dev
 
 **2. GitHub Specific Model**
 
-The presentation agent defaults to `gpt-5.6-sol` for Copilot SDK code, JSON,
+The idea2Impact Agent defaults to `gpt-5.6-sol` for Copilot SDK code, JSON,
 and HTML/CSS generation. Set `MODEL_NAME` to override it with another
 GitHub-hosted model:
 
@@ -237,20 +271,17 @@ curl -X POST http://localhost:3100/chat \
   -d '{"message": "Hello"}'
 ```
 
-Architecture PNG generation uses the `gpt-image-2` deployment by default. Set
-`ARCHITECTURE_MODEL_ENDPOINT` to the Azure AI Services endpoint and override
-`ARCHITECTURE_IMAGE_DEPLOYMENT` only when using another deployment. GPT-Image-2
-outputs a native 16:9 `1536x864` canvas; older GPT image deployments retain
-their supported `1536x1024` size.
-
-Production image and vision requests use Managed Identity. Local development can
-set `ARCHITECTURE_MODEL_API_KEY` as a process-only fallback when the signed-in
-developer does not have the model data-plane role. Do not persist this key in
-source control, azd environment files, project assets, or browser storage.
-
 ### Local Development
 
 The easiest way to run locally is with [`azd app`](https://github.com/jongio/azd-app), which starts all services, installs dependencies, and provides a real-time dashboard:
+
+On Windows, run the authentication bootstrap first. Dot-sourcing keeps the
+restored GitHub and Azure environment variables in the current PowerShell
+session:
+
+```powershell
+. .\scripts\setup-local-auth.ps1 -EnvironmentName copilot-sdk-presentation-agent
+```
 
 ```bash
 # Install the azd app extension (one-time)
@@ -349,6 +380,19 @@ cd tests/integration && pnpm install && pnpm test
 cd src/api && pnpm test:models
 ```
 
+Run the explicit live presentation E2E test against an already-running local
+API. This test performs real model, GitHub, image, Speech, and FFmpeg calls, so
+it is intentionally excluded from the default integration suite:
+
+```powershell
+$env:PRESENTATION_E2E_BASE_URL = "http://127.0.0.1:3000"
+cd tests\integration
+pnpm test:presentation-e2e
+```
+
+Evidence is written to `tests/integration/artifacts/presentation-e2e/`. Override
+that location with `PRESENTATION_E2E_OUTPUT_DIR`.
+
 **What it tests:**
 - ✅ GitHub Default model (no config)
 - ✅ GitHub Specific model (`MODEL_NAME=gpt-4o`)
@@ -373,9 +417,9 @@ azd up
 This single command handles the entire deployment pipeline:
 
 1. **Preprovision hook** — Retrieves your `GITHUB_TOKEN` from the `gh` CLI and stores it in the `azd` environment
-2. **Provisions infrastructure** — Creates Azure Container Registry, Container Apps Environment, Key Vault, Application Insights, and a managed identity (using [Azure Verified Modules](https://azure.github.io/Azure-Verified-Modules/))
+2. **Provisions infrastructure** — Creates Azure Container Registry, Container Apps Environment, Key Vault, Application Insights, managed identities, and the Microsoft Foundry project integration (using [Azure Verified Modules](https://azure.github.io/Azure-Verified-Modules/))
 3. **Builds and pushes** — Builds the Docker images and pushes them to the provisioned ACR
-4. **Deploys** — Deploys both containers to Azure Container Apps with the `GITHUB_TOKEN` securely referenced from Key Vault
+4. **Deploys** — Deploys the API and web containers to Azure Container Apps and the optional idea2Impact hosted-agent container to Microsoft Foundry, with secrets referenced from Key Vault
 
 ### Verify Deployed App
 

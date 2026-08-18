@@ -28,7 +28,7 @@ const MAX_CONCURRENT_JOBS = Math.max(
 );
 const JOB_TTL_MS = (Number(process.env.VIDEO_JOB_TTL_HOURS) || 24) * 60 * 60 * 1000;
 const VIDEO_ROOT = resolve(
-  process.env.VIDEO_WORK_DIR || join(tmpdir(), "presentation-agent-video"),
+  process.env.VIDEO_WORK_DIR || join(tmpdir(), "idea2impact-agent-video"),
 );
 const ALLOWED_EXTENSIONS = new Set([".mp4", ".mov", ".mkv", ".webm", ".m4v"]);
 const JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

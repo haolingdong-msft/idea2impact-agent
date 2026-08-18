@@ -5,7 +5,7 @@ import type { GitHubAuthStatus } from '../hooks/useGitHubAuth'
 interface Props {
   isLoading: boolean
   onSubmit: (brief: PresentationBrief) => void
-  onQuickTest?: (brief: PresentationBrief) => void
+  onEdit?: () => void
   githubStatus?: GitHubAuthStatus
   onGitHubLogout?: () => void
 }
@@ -21,18 +21,19 @@ const INITIAL_BRIEF: PresentationBrief = {
 export function IdeaBrief({
   isLoading,
   onSubmit,
-  onQuickTest,
+  onEdit,
   githubStatus,
   onGitHubLogout,
 }: Props) {
   const [brief, setBrief] = useState(INITIAL_BRIEF)
 
   const update = (field: keyof PresentationBrief, value: string) => {
+    onEdit?.()
     setBrief(current => ({ ...current, [field]: value }))
   }
 
   const normalizedBrief = (): PresentationBrief => ({
-    title: brief.title.trim() || 'Untitled presentation',
+    title: brief.title.trim() || 'Turn your idea into a story people remember',
     idea: brief.idea.trim(),
     audience: brief.audience.trim(),
     purpose: brief.purpose.trim(),
@@ -41,7 +42,7 @@ export function IdeaBrief({
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
-    if (brief.idea.trim().length < 10) return
+    if (!brief.idea.trim()) return
     onSubmit(normalizedBrief())
   }
 
@@ -49,57 +50,27 @@ export function IdeaBrief({
     <form className="brief-card" onSubmit={submit}>
       <div className="brief-heading">
         <div>
-          <span className="eyebrow">New architecture story</span>
+          <span className="eyebrow">Step 01 / Start story</span>
           <h2>What are you building?</h2>
-          <p>Start with the idea. Optionally connect a GitHub codebase so Copilot can ground the story and architecture in code and docs.</p>
+          <p>Start with the idea. Optionally connect a GitHub codebase so Copilot can ground the story and overview in code and docs.</p>
         </div>
         <span className="brief-step">01</span>
       </div>
 
-      <label className="field field-wide">
-        <span>Idea</span>
-        <textarea
-          value={brief.idea}
-          onChange={event => update('idea', event.target.value)}
-          placeholder="Example: An agent that turns a product idea into a story, architecture, demo narration, and polished video."
-          rows={6}
-          autoFocus
-        />
-      </label>
-
-
-      <details className="brief-options">
-        <summary>Optional details and codebase</summary>
-        <div className="brief-grid">
-          <label className="field">
-            <span>Working title (optional)</span>
-            <input
-              value={brief.title}
-              onChange={event => update('title', event.target.value)}
-              placeholder="Presentation Agent"
-            />
-          </label>
-          <label className="field">
-            <span>Audience (optional)</span>
-            <input
-              value={brief.audience}
-              onChange={event => update('audience', event.target.value)}
-              placeholder="Product and engineering leaders"
-            />
-          </label>
-        </div>
-
-        <label className="field field-wide">
-          <span>Purpose (optional)</span>
-          <input
-            value={brief.purpose}
-            onChange={event => update('purpose', event.target.value)}
-            placeholder="Align the team and secure approval for an MVP"
+      <div className="brief-inputs">
+        <label className="field">
+          <span>1. Idea</span>
+          <textarea
+            value={brief.idea}
+            onChange={event => update('idea', event.target.value)}
+            placeholder="Describe the product, problem, or concept you want to turn into a compelling story."
+            rows={7}
+            autoFocus
           />
         </label>
 
-        <label className="field field-wide">
-          <span>GitHub repository URL (optional)</span>
+        <label className="field">
+          <span>2. GitHub repository link <small>Optional</small></span>
           <input
             type="url"
             value={brief.repositoryUrl || ''}
@@ -107,6 +78,8 @@ export function IdeaBrief({
             placeholder="https://github.com/owner/repository"
           />
         </label>
+      </div>
+
         {githubStatus?.configured && (
           <div className="github-access">
             {githubStatus.authenticated ? (
@@ -130,28 +103,13 @@ export function IdeaBrief({
             )}
           </div>
         )}
-      </details>
 
       <div className="brief-actions">
         <span>Only the idea is required. Repository access is read-only.</span>
-        <button className="primary-button" disabled={isLoading || brief.idea.trim().length < 10}>
-          {isLoading ? 'Starting conversation...' : 'Start outline'}
+        <button className="primary-button" disabled={isLoading || !brief.idea.trim()}>
+          {isLoading ? 'Starting story...' : 'Start story'}
           <span aria-hidden="true">-&gt;</span>
         </button>
-        {onQuickTest && (
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={
-              isLoading ||
-              brief.idea.trim().length < 10 ||
-              !brief.repositoryUrl?.trim()
-            }
-            onClick={() => onQuickTest(normalizedBrief())}
-          >
-            {isLoading ? 'Running quick test...' : 'Quick test: generate slides'}
-          </button>
-        )}
       </div>
     </form>
   )

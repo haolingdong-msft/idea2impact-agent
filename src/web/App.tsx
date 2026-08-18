@@ -6,7 +6,7 @@ import { IdeaBrief } from './components/IdeaBrief'
 import { MessageInput } from './components/MessageInput'
 import { OutlineWorkspace } from './components/OutlineWorkspace'
 import { SlideWorkspace } from './components/SlideWorkspace'
-import { SpeechWorkspace } from './components/SpeechWorkspace'
+import { SlideVideoWorkspace } from './components/SlideVideoWorkspace'
 import { VideoWorkspace } from './components/VideoWorkspace'
 import { WorkflowRail } from './components/WorkflowRail'
 import { useArchitecture } from './hooks/useArchitecture'
@@ -16,8 +16,30 @@ import { useSlides } from './hooks/useSlides'
 import { useRepository } from './hooks/useRepository'
 import { useGitHubAuth } from './hooks/useGitHubAuth'
 import { useOutline } from './hooks/useOutline'
-import { useSpeechScript } from './hooks/useSpeechScript'
 import type { ArchitectureVisualMode, PresentationBrief } from './types'
+
+const COPILOT_WORKFLOW_CONTEXTS = [
+  {
+    label: 'Start story',
+    subtitle: 'Editing the shared story',
+    placeholder: 'Ask Copilot to refine the problem, scenarios, or solution...',
+  },
+  {
+    label: 'Generate overview image',
+    subtitle: 'Editing overview image direction',
+    placeholder: 'Describe what to change in the overview image...',
+  },
+  {
+    label: 'Generate slides',
+    subtitle: 'Editing slide content and direction',
+    placeholder: 'Describe what to change in the slides...',
+  },
+  {
+    label: 'Generate video',
+    subtitle: 'Editing video narrative and direction',
+    placeholder: 'Describe what to change in the video...',
+  },
+] as const
 
 export default function App() {
   const { messages, isLoading, sendMessage, resetConversation } = useService()
@@ -33,12 +55,14 @@ export default function App() {
     project,
     isSaving: isSavingProject,
     error: projectError,
+    clearError: clearProjectError,
     createPresentationProject,
   } = useProject()
   const {
     outline,
     isGenerating: isGeneratingOutline,
     isSaving: isSavingOutline,
+    isApproving: isApprovingOutline,
     error: outlineError,
     generateOutline,
     updateOutline,
@@ -47,25 +71,17 @@ export default function App() {
   } = useOutline()
   const {
     result: slideResult,
+    progress: slideProgress,
     isGenerating: isGeneratingSlides,
     error: slideError,
     generateSlides,
     clearSlides,
   } = useSlides()
-  const {
-    script,
-    setScript,
-    isGenerating: isGeneratingSpeech,
-    isSaving: isSavingSpeech,
-    error: speechError,
-    generateScript,
-    saveScript,
-    clearScript,
-  } = useSpeechScript()
   const [brief, setBrief] = useState<PresentationBrief | null>(null)
   const [architectureView, setArchitectureView] = useState<ArchitectureVisualMode>('image')
-  const [recordingUploaded, setRecordingUploaded] = useState(false)
-  const [recordingRefined, setRecordingRefined] = useState(false)
+  const [videoGenerated, setVideoGenerated] = useState(false)
+  const [showSlideVideo, setShowSlideVideo] = useState(false)
+  const [copilotWorkflowStep, setCopilotWorkflowStep] = useState(0)
   const [quickStatus, setQuickStatus] = useState<string | null>(null)
   const [quickError, setQuickError] = useState<string | null>(null)
   const {
@@ -102,55 +118,21 @@ export default function App() {
 
   const sendOutlineMessage = async (message: string) => {
     if (!project) return
+    const context = COPILOT_WORKFLOW_CONTEXTS[copilotWorkflowStep]
     const updatedMessages = await sendMessage(
       message,
       undefined,
       project.id,
       slideResult ? 'refinement' : 'initial',
+      [
+        `The user is editing the "${context.label}" workflow stage.`,
+        'Apply the request to the shared presentation story so downstream assets can be regenerated consistently.',
+      ].join(' '),
     )
     if (updatedMessages) {
       await generateOutline(project.id, updatedMessages)
       clearSlides()
-      clearScript()
-      setRecordingUploaded(false)
-      setRecordingRefined(false)
-    }
-  }
-
-  const quickTestCodebase = async (nextBrief: PresentationBrief) => {
-    if (!nextBrief.repositoryUrl) return
-    setQuickError(null)
-    try {
-      resetConversation()
-      resetOutline()
-      clearSlides()
-      clearScript()
-      setRecordingUploaded(false)
-      setRecordingRefined(false)
-      setQuickStatus('Creating project...')
-      const createdProject = await createPresentationProject(nextBrief)
-      setBrief(nextBrief)
-      setQuickStatus('Scanning codebase...')
-      await scanRepository(createdProject.id, nextBrief.repositoryUrl)
-      setQuickStatus('Generating codebase-grounded outline...')
-      const draft = await generateOutline(createdProject.id, [])
-      setQuickStatus('Locking quick-test outline revision...')
-      const approved = await approveOutline(createdProject.id, draft)
-      setQuickStatus('Generating architecture designs...')
-      await generateArchitecture(
-        nextBrief,
-        JSON.stringify(approved),
-        createdProject.id,
-        true,
-      )
-      setQuickStatus('Generating slides...')
-      await generateSlides(createdProject.id, architectureView)
-      setQuickStatus(null)
-    } catch (caught) {
-      setQuickStatus(null)
-      setQuickError(
-        caught instanceof Error ? caught.message : 'Codebase quick test failed.',
-      )
+      setVideoGenerated(false)
     }
   }
 
@@ -163,17 +145,31 @@ export default function App() {
     }
   }
 
-  const generateApprovedPresentation = async () => {
+  const generateOverview = async () => {
     if (!brief || !project || outline?.status !== 'approved') return
     setQuickError(null)
     try {
       clearSlides()
-      clearScript()
-      setRecordingUploaded(false)
-      setRecordingRefined(false)
+      setVideoGenerated(false)
       const context = JSON.stringify(outline)
-      setQuickStatus('Generating architecture design...')
+      setQuickStatus('Generating overview image...')
       await generateArchitecture(brief, context, project.id, true)
+      setQuickStatus(null)
+    } catch (caught) {
+      setQuickStatus(null)
+      setQuickError(
+        caught instanceof Error ? caught.message : 'Overview generation failed.',
+      )
+    }
+  }
+
+  const generateSlideDeck = async () => {
+    if (!project || !architecture || outline?.status !== 'approved') return
+    setQuickError(null)
+    try {
+      setShowSlideVideo(false)
+      clearSlides()
+      setVideoGenerated(false)
       setQuickStatus('Composing slide deck...')
       await generateSlides(project.id, architectureView)
       setQuickStatus(null)
@@ -185,46 +181,52 @@ export default function App() {
     }
   }
 
-  const outlineComplete = Boolean(
-    outline &&
-    outline.problemStatement.trim().length >= 20 &&
-    outline.userScenarios.trim().length >= 20 &&
-    outline.solution.trim().length >= 20,
-  )
   const activeStep = !brief
     ? 0
     : outline?.status !== 'approved'
-      ? outlineComplete ? 3 : outline ? 2 : 1
-      : !slideResult
-        ? 4
-        : !script
-          ? 5
-          : !recordingUploaded
-            ? 6
-            : !recordingRefined
-              ? 7
-              : 8
+      ? 0
+      : !architecture
+        ? 1
+        : !slideResult
+          ? 2
+          : videoGenerated
+            ? 4
+            : 3
   const outlineBusy =
     isLoading ||
     isGeneratingOutline ||
     isGenerating ||
-    isGeneratingSlides ||
-    isGeneratingSpeech
+    isGeneratingSlides
+  const openCopilotForStep = (step: number) => {
+    setCopilotWorkflowStep(step)
+    window.requestAnimationFrame(() => {
+      const target = brief
+        ? document.getElementById('copilot-panel')
+        : document.querySelector<HTMLElement>('.brief-card')
+      target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      target?.querySelector<HTMLTextAreaElement>('textarea')?.focus()
+    })
+  }
+  const copilotContext = COPILOT_WORKFLOW_CONTEXTS[copilotWorkflowStep]
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <a className="brand" href="/" aria-label="Presentation Agent home">
-          <span>PA</span>
+        <a className="brand" href="/" aria-label="Idea2Impact Agent home">
+          <span>I2I</span>
           <div>
-            <strong>Presentation</strong>
-            <small>Agent workspace</small>
+            <strong>Idea2Impact</strong>
+            <small>Agent studio</small>
           </div>
         </a>
-        <WorkflowRail activeStep={activeStep} />
+        <WorkflowRail
+          activeStep={activeStep}
+          selectedStep={copilotWorkflowStep}
+          onSelect={openCopilotForStep}
+        />
         <div className="sidebar-note">
           <span>Powered by</span>
-          <strong>GitHub Copilot SDK</strong>
+          <strong>Microsoft Foundry and GitHub Copilot</strong>
           <small>Orchestrated asset release</small>
         </div>
       </aside>
@@ -232,8 +234,8 @@ export default function App() {
       <main className="main-workspace">
         <header className="workspace-header">
           <div>
-            <span className="eyebrow">Presentation workspace / Orchestrated assets</span>
-            <h1>{brief?.title || 'Turn an idea into a clear system story'}</h1>
+            <span className="eyebrow">Idea2Impact workspace / Orchestrated assets</span>
+            <h1>{brief?.title || 'Turn your idea into a story people remember'}</h1>
           </div>
           <div className="header-actions">
             <span className="status-pill"><i /> Workspace ready</span>
@@ -284,7 +286,7 @@ export default function App() {
                 <IdeaBrief
                   isLoading={isSavingProject || isScanning || isLoading || isGeneratingOutline}
                   onSubmit={briefValue => void startProject(briefValue)}
-                  onQuickTest={briefValue => void quickTestCodebase(briefValue)}
+                  onEdit={clearProjectError}
                   githubStatus={githubStatus}
                   onGitHubLogout={() => void logoutGitHub()}
                 />
@@ -292,6 +294,7 @@ export default function App() {
               </div>
               <ArchitectureCanvas architecture={null} visual={null} isLoading={false} error={null} />
             </div>
+            <SlideVideoWorkspace />
             <VideoWorkspace standalone />
           </>
         ) : (
@@ -301,21 +304,28 @@ export default function App() {
                 <OutlineWorkspace
                   outline={outline}
                   isBusy={outlineBusy}
+                  isGeneratingOutline={isGeneratingOutline}
+                  isApproving={isApprovingOutline}
                   isSaving={isSavingOutline}
                   error={outlineError || error || slideError}
+                  isGeneratingOverview={isGenerating}
                   onChange={value => project && updateOutline(project.id, value)}
                   onApprove={() => void approveCurrentOutline()}
-                  onGenerate={() => void generateApprovedPresentation()}
+                  onGenerateOverview={() => void generateOverview()}
                 />
               </div>
-              <aside className="copilot-panel">
+              <aside className="copilot-panel" id="copilot-panel">
                 <header>
-                  <div className="copilot-avatar">C</div>
+                  <div className="copilot-avatar">AI</div>
                   <div>
-                    <strong>Outline copilot</strong>
-                    <span>Problem / Scenarios / Solution</span>
+                    <strong>Idea2Impact Copilot</strong>
+                    <span>{copilotContext.subtitle}</span>
                   </div>
                 </header>
+                <div className="copilot-workflow-context">
+                  <span>Workflow context</span>
+                  <strong>{copilotContext.label}</strong>
+                </div>
                 {repositoryEvidence && (
                   <div className="repository-status">
                     <strong>{repositoryEvidence.repository.owner}/{repositoryEvidence.repository.name}</strong>
@@ -332,6 +342,7 @@ export default function App() {
                 <MessageInput
                   onSend={message => void sendOutlineMessage(message)}
                   disabled={isLoading || isGeneratingOutline}
+                  placeholder={copilotContext.placeholder}
                 />
               </aside>
             </div>
@@ -354,29 +365,21 @@ export default function App() {
                 architecture={architecture}
                 visual={visual}
                 result={slideResult}
+                progress={slideProgress}
                 isGenerating={isGenerating || isGeneratingSlides}
                 error={slideError}
                 architectureMode={architectureView}
                 onArchitectureModeChange={setArchitectureView}
-                onGenerate={() => void generateApprovedPresentation()}
+                onGenerate={() => void generateSlideDeck()}
+                onCreateVideo={() => setShowSlideVideo(true)}
               />
             )}
-            {slideResult && (
-              <SpeechWorkspace
-                script={script}
-                isGenerating={isGeneratingSpeech}
-                isSaving={isSavingSpeech}
-                error={speechError}
-                onGenerate={() => void generateScript(project.id)}
-                onChange={setScript}
-                onSave={() => script && void saveScript(project.id, script)}
-              />
-            )}
-            {script && (
-              <VideoWorkspace
-                projectId={project.id}
-                onUploadComplete={() => setRecordingUploaded(true)}
-                onRefinementComplete={() => setRecordingRefined(true)}
+            {slideResult && showSlideVideo && (
+              <SlideVideoWorkspace
+                sourceUrl={slideResult.downloadUrl}
+                sourceName={`${slideResult.deck.title} HTML deck`}
+                autoStart
+                onComplete={() => setVideoGenerated(true)}
               />
             )}
           </>

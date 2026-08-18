@@ -118,7 +118,7 @@ type GitHubTreeItem = {
 function githubHeaders(token?: string, accept = "application/vnd.github+json") {
   const headers: Record<string, string> = {
     Accept: accept,
-    "User-Agent": "presentation-agent",
+    "User-Agent": "idea2impact-agent",
     "X-GitHub-Api-Version": "2022-11-28",
   };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -339,7 +339,7 @@ export async function scanGitHubRepository(
   const warnings = [
     ...(metadata.archived ? ["Repository is archived."] : []),
     ...(truncated ? ["Repository scan was truncated by deterministic safety limits."] : []),
-    ...(files.length === 0 ? ["No architecture-relevant text files were extracted."] : []),
+    ...(files.length === 0 ? ["No project-overview-relevant text files were extracted."] : []),
   ];
   return {
     schemaVersion: 1,

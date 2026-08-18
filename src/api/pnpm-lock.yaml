@@ -23,6 +23,9 @@ importers:
       express:
         specifier: ^5.2.1
         version: 5.2.1
+      pptxgenjs:
+        specifier: 4.0.1
+        version: 4.0.1
       puppeteer:
         specifier: 25.5.0
         version: 25.5.0

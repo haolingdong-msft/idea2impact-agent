@@ -17,11 +17,14 @@ describe('OutlineWorkspace', () => {
       <OutlineWorkspace
         outline={outline}
         isBusy={false}
+        isGeneratingOutline={false}
+        isApproving={false}
         isSaving={false}
         error={null}
+        isGeneratingOverview={false}
         onChange={onChange}
         onApprove={onApprove}
-        onGenerate={vi.fn()}
+        onGenerateOverview={vi.fn()}
       />,
     )
 
@@ -32,25 +35,67 @@ describe('OutlineWorkspace', () => {
       problemStatement: 'A revised problem statement with enough useful detail.',
       status: 'draft',
     }))
-    fireEvent.click(screen.getByRole('button', { name: /approve complete outline/i }))
+    fireEvent.click(screen.getByRole('button', { name: /complete story/i }))
     expect(onApprove).toHaveBeenCalledOnce()
   })
 
   it('locks the approved revision and exposes generation', () => {
-    const onGenerate = vi.fn()
+    const onGenerateOverview = vi.fn()
     render(
       <OutlineWorkspace
         outline={{ ...outline, status: 'approved', approvedAt: '2026-08-11T00:00:00Z' }}
         isBusy={false}
+        isGeneratingOutline={false}
+        isApproving={false}
         isSaving={false}
         error={null}
+        isGeneratingOverview={false}
         onChange={vi.fn()}
         onApprove={vi.fn()}
-        onGenerate={onGenerate}
+        onGenerateOverview={onGenerateOverview}
       />,
     )
     expect(screen.getAllByRole('textbox')[0]).toHaveAttribute('readonly')
-    fireEvent.click(screen.getByRole('button', { name: /generate slides/i }))
-    expect(onGenerate).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole('button', { name: /generate overview image/i }))
+    expect(onGenerateOverview).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: /generate slides/i }))
+      .not.toBeInTheDocument()
+  })
+
+  it('distinguishes outline generation from approval', () => {
+    const { rerender } = render(
+      <OutlineWorkspace
+        outline={outline}
+        isBusy
+        isGeneratingOutline
+        isApproving={false}
+        isSaving={false}
+        error={null}
+        isGeneratingOverview={false}
+        onChange={vi.fn()}
+        onApprove={vi.fn()}
+        onGenerateOverview={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Generating outline...' }))
+      .toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Approving...' }))
+      .not.toBeInTheDocument()
+
+    rerender(
+      <OutlineWorkspace
+        outline={outline}
+        isBusy
+        isGeneratingOutline={false}
+        isApproving
+        isSaving={false}
+        error={null}
+        isGeneratingOverview={false}
+        onChange={vi.fn()}
+        onApprove={vi.fn()}
+        onGenerateOverview={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Approving...' })).toBeDisabled()
   })
 })

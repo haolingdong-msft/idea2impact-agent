@@ -4,6 +4,7 @@ import type {
   ArchitectureVisual,
   ArchitectureVisualMode,
   Slide,
+  SlideGenerationProgress,
   SlideGenerationResult,
 } from '../types'
 
@@ -11,11 +12,13 @@ interface Props {
   architecture: ArchitectureGraph
   visual: ArchitectureVisual | null
   result: SlideGenerationResult | null
+  progress?: SlideGenerationProgress | null
   isGenerating: boolean
   error: string | null
   architectureMode?: ArchitectureVisualMode
   onArchitectureModeChange?: (mode: ArchitectureVisualMode) => void
   onGenerate: () => void
+  onCreateVideo?: () => void
 }
 
 function ArchitectureSlide({
@@ -49,7 +52,7 @@ function ArchitectureSlide({
         <iframe
           className="slide-architecture-html-frame"
           src={activeHtmlUrl}
-          title={`${architecture.title} architecture diagram`}
+          title={`${architecture.title} overview diagram`}
           sandbox=""
         />
         <span>Copilot HTML + CSS</span>
@@ -67,7 +70,7 @@ function ArchitectureSlide({
       <div className="slide-architecture-image">
         <img
           src={activeImageUrl}
-          alt={`${architecture.title} architecture design graph`}
+          alt={`${architecture.title} overview design graph`}
         />
         <span>Foundry image model</span>
       </div>
@@ -126,8 +129,11 @@ function SlideContent({
   architectureMode: ArchitectureVisualMode
   index: number
 }) {
+  const hasStoryImage = slide.kind !== 'architecture' && Boolean(slide.imageUrl)
   return (
-    <article className={`slide-preview theme-azure slide-kind-${slide.kind}`}>
+    <article className={`slide-preview theme-azure slide-kind-${slide.kind}${
+      hasStoryImage ? ' has-story-image' : ''
+    }`}>
       <span className="slide-index">{String(index + 1).padStart(2, '0')}</span>
       <span className="eyebrow">{slide.eyebrow}</span>
       <h3>{slide.title}</h3>
@@ -139,11 +145,16 @@ function SlideContent({
           architectureMode={architectureMode}
         />
       ) : (
-        <ul>
-          {slide.bullets.map((bullet, bulletIndex) => (
-            <li key={`${slide.id}-${bulletIndex}`}>{bullet}</li>
-          ))}
-        </ul>
+        <div className="slide-story-layout">
+          {slide.imageUrl && (
+            <div className="slide-story-image">
+              <img
+                src={slide.imageUrl}
+                alt={`${slide.title} illustration`}
+              />
+            </div>
+          )}
+        </div>
       )}
     </article>
   )
@@ -153,11 +164,12 @@ export function SlideWorkspace({
   architecture,
   visual,
   result,
+  progress,
   isGenerating,
   error,
   architectureMode = 'image',
-  onArchitectureModeChange,
   onGenerate,
+  onCreateVideo,
 }: Props) {
   const [activeSlide, setActiveSlide] = useState(0)
 
@@ -169,15 +181,30 @@ export function SlideWorkspace({
     <section className="slide-workspace" aria-labelledby="slide-workspace-title">
       <header className="slide-workspace-heading">
         <div>
-          <span className="eyebrow">Step 05 / Generate slides</span>
+          <span className="eyebrow">Step 03 / Generate slides</span>
           <h2 id="slide-workspace-title">Turn the approved outline into a deck</h2>
           <p>
-            The deck reuses the approved outline and architecture. Download the
-            HTML source or an editable PowerPoint generated from the same slide DOM.
+            The deck turns Problem, User Scenarios, and Solution into full-slide
+            images that can be downloaded directly as HTML or PowerPoint.
           </p>
         </div>
         {result && <span className="asset-badge">Stored with lineage</span>}
       </header>
+
+      {isGenerating && progress && (
+        <div className="slide-generation-progress" aria-live="polite">
+          <div>
+            <strong>{progress.stage}</strong>
+            <span>{progress.percent}%</span>
+          </div>
+          <progress
+            max="100"
+            value={progress.percent}
+            aria-label="Slide generation progress"
+          />
+          <p>{progress.log}</p>
+        </div>
+      )}
 
       {!result ? (
         <div className="slide-generation-empty">
@@ -185,13 +212,13 @@ export function SlideWorkspace({
             <span>Problem</span>
             <span>User scenarios</span>
             <span>Solution</span>
-            <span>Architecture</span>
+            <span>Overview</span>
           </div>
           <div>
             <strong>Ready to compose {architecture.title}</strong>
             <p>
-              Copilot will produce title, problem, user-scenarios, solution, and architecture
-              slide without changing the approved technical design.
+              Copilot will choose the right number of slides while covering Problem
+              Statement, User Scenarios, and Solution with a dedicated visual per slide.
             </p>
             {error && <p className="slide-error" role="alert">{error}</p>}
             <button
@@ -218,7 +245,7 @@ export function SlideWorkspace({
           <div className="slide-review-panel">
             <div className="deck-actions">
               <div>
-                <span className="eyebrow">HTML deck ready</span>
+                <span className="eyebrow">Image deck ready</span>
                 <strong>{result.deck.slides.length} slides</strong>
               </div>
               <div>
@@ -229,7 +256,7 @@ export function SlideWorkspace({
                   Download HTML
                 </a>
                 <a href={result.pptxDownloadUrl} download>
-                  Download editable PPTX
+                  Download PPTX
                 </a>
               </div>
             </div>
@@ -258,6 +285,16 @@ export function SlideWorkspace({
             >
               {isGenerating ? 'Regenerating...' : 'Regenerate deck'}
             </button>
+            {onCreateVideo && (
+              <button
+                type="button"
+                className="create-slide-video-button"
+                disabled={isGenerating}
+                onClick={onCreateVideo}
+              >
+                Generate video
+              </button>
+            )}
           </div>
         </div>
       )}

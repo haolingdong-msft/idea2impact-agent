@@ -31,7 +31,7 @@ afterEach(async () => {
 describe("presentation projects", () => {
   it("creates a persisted project with a brief asset", async () => {
     const response = await request(createApp()).post("/projects").send({
-      title: "Presentation Agent",
+      title: "Idea2Impact Agent",
       idea: "Build an agent that creates architecture and slides.",
       audience: "Engineering leaders",
       purpose: "Approve an MVP",
@@ -49,7 +49,7 @@ describe("presentation projects", () => {
     const loaded = await request(createApp())
       .get(`/projects/${response.body.project.id}`);
     expect(loaded.status).toBe(200);
-    expect(loaded.body.project.brief.title).toBe("Presentation Agent");
+    expect(loaded.body.project.brief.title).toBe("Idea2Impact Agent");
     expect(loaded.body.project.brief.repositoryUrl).toBe(
       "https://github.com/example/presentation-agent",
     );
@@ -69,6 +69,16 @@ describe("presentation projects", () => {
     });
   });
 
+  it("accepts a short non-empty idea for smoke testing", async () => {
+    const response = await request(createApp()).post("/projects").send({
+      idea: "test",
+    });
+
+    expect(response.status).toBe(201);
+    createdProjects.push(response.body.project.id);
+    expect(response.body.project.brief.idea).toBe("test");
+  });
+
   it("rejects non-GitHub repository URLs", async () => {
     const response = await request(createApp()).post("/projects").send({
       idea: "Create architecture and slides from a source repository.",
@@ -76,6 +86,7 @@ describe("presentation projects", () => {
     });
 
     expect(response.status).toBe(400);
+    expect(response.body.error).toContain("Repository URL");
   });
 
   it("stores approved story context with brief lineage", async () => {
@@ -101,7 +112,7 @@ describe("presentation projects", () => {
 
   it("invalidates current slides without deleting revision history", async () => {
     const project = await createProject({
-      title: "Presentation Agent",
+      title: "Idea2Impact Agent",
       idea: "Keep slide revisions when architecture changes.",
       audience: "",
       purpose: "",

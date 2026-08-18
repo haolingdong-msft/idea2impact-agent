@@ -35,6 +35,7 @@ export type ProjectAssetType =
   | "slide-model"
   | "slide-deck"
   | "slide-deck-pptx"
+  | `slide-image-${string}`
   | "speech-script"
   | "source-video"
   | "refined-video"

@@ -84,6 +84,38 @@ describe("architecture visual models", () => {
     }
   });
 
+  it("honors image-model rate-limit retry guidance", async () => {
+    vi.useFakeTimers();
+    try {
+      const onRetry = vi.fn();
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          error: { code: "RateLimitReached", message: "Please retry after 60 seconds." },
+        }), { status: 429, headers: { "retry-after": "60" } }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          data: [{ b64_json: Buffer.from("png-image").toString("base64") }],
+        }), { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const generation = generateArchitectureImage(
+        "approved evidence",
+        "validated-architecture",
+        onRetry,
+      );
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(Buffer.from(await generation).toString()).toBe("png-image");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(onRetry).toHaveBeenCalledWith({
+        attempt: 2,
+        delaySeconds: 60,
+        status: 429,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("uses a native 16:9 canvas for GPT-Image-2", async () => {
     vi.stubEnv("ARCHITECTURE_IMAGE_DEPLOYMENT", "gpt-image-2");
     const fetchMock = vi.fn().mockResolvedValue(
@@ -137,11 +169,22 @@ describe("architecture visual models", () => {
 
     const request = JSON.parse(String(fetchMock.mock.calls[0][1].body));
     expect(request.prompt.length).toBeLessThanOrEqual(12_000);
-    expect(request.prompt).toContain("VALIDATED ARCHITECTURE SUMMARY");
-    expect(request.prompt).toContain("art-directed executive software architecture");
-    expect(request.prompt).toContain("single horizontal row of all components is forbidden");
-    expect(request.prompt).toContain("never truncate labels");
-    expect(request.prompt).toContain("80-90% of the usable canvas");
+    expect(request.prompt).toContain("VALIDATED PROJECT OVERVIEW SUMMARY");
+    expect(request.prompt).toContain(
+      "Choose the composition yourself while keeping the architecture and workflow easy to scan",
+    );
+    expect(request.prompt).toContain(
+      "short thin orthogonal lines with small arrowheads",
+    );
+    expect(request.prompt).toContain(
+      "no more than about 20% of the canvas width or height",
+    );
+    expect(request.prompt).toContain(
+      "Connect only adjacent workflow steps with short thin arrows",
+    );
+    expect(request.prompt).toContain(
+      "Never connect workflow steps to architecture components",
+    );
   });
 
   it("validates bounded layout nodes and matching connections", () => {
@@ -170,7 +213,7 @@ describe("architecture visual models", () => {
         layout.nodes[1],
       ],
     }, new Set(["web", "agent"]), new Set(["web->agent"]))).toThrow(
-      "outside the architecture canvas",
+      "outside the project overview canvas",
     );
   });
 });

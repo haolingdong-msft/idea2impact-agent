@@ -35,6 +35,7 @@ export type ArchitectureVisual = {
     | "legacy";
   imageUrl?: string;
   pptxDownloadUrl?: string;
+  pptxGenerateUrl?: string;
   narrativeImageUrl?: string;
   htmlUrl?: string;
   validatedJsonHtmlUrl?: string;
@@ -56,6 +57,15 @@ const IMAGE_TIMEOUT_MS = 120_000;
 const LAYOUT_TIMEOUT_MS = 120_000;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_IMAGE_PROMPT_LENGTH = 12_000;
+const MAX_MODEL_ATTEMPTS = 4;
+
+export type ModelRetryNotice = {
+  attempt: number;
+  delaySeconds: number;
+  status: number;
+};
+
+let imageGenerationQueue: Promise<void> = Promise.resolve();
 
 async function getCredential(): Promise<Credential> {
   if (credential) return credential;
@@ -129,8 +139,9 @@ async function modelFetch(
   url: string,
   body: unknown,
   timeout: number,
+  onRetry?: (notice: ModelRetryNotice) => void,
 ): Promise<Response> {
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= MAX_MODEL_ATTEMPTS; attempt += 1) {
     const response = await fetch(url, {
       method: "POST",
       headers: await modelHeaders(),
@@ -143,13 +154,33 @@ async function modelFetch(
     const detail = (await response.text()).slice(0, 800);
     const deploymentNotFound =
       response.status === 404 && /DeploymentNotFound/i.test(detail);
-    if (deploymentNotFound && attempt < 3) {
+    if (deploymentNotFound && attempt < MAX_MODEL_ATTEMPTS) {
       await new Promise(resolve => setTimeout(resolve, attempt * 750));
+      continue;
+    }
+    if (response.status === 429 && attempt < MAX_MODEL_ATTEMPTS) {
+      const retryAfterHeader = Number(response.headers.get("retry-after"));
+      const retryAfterMessage = Number(
+        detail.match(/retry after\s+(\d+)\s+seconds?/i)?.[1],
+      );
+      const delaySeconds = Math.min(
+        120,
+        Math.max(
+          1,
+          Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+            ? retryAfterHeader
+            : Number.isFinite(retryAfterMessage) && retryAfterMessage > 0
+              ? retryAfterMessage
+              : attempt * 15,
+        ),
+      );
+      onRetry?.({ attempt: attempt + 1, delaySeconds, status: response.status });
+      await new Promise(resolve => setTimeout(resolve, delaySeconds * 1_000));
       continue;
     }
     if (response.status === 401 || response.status === 403) {
       throw new Error(
-        `Architecture model access failed (${response.status}). Grant the API managed identity ` +
+        `Project overview model access failed (${response.status}). Grant the API managed identity ` +
         `Cognitive Services OpenAI User on the model resource. ${detail}`,
       );
     }
@@ -158,11 +189,25 @@ async function modelFetch(
       target.pathname.match(/\/deployments\/([^/]+)/)?.[1] || "unknown",
     );
     throw new Error(
-      `Architecture model request failed (${response.status}) for deployment ` +
+      `Project overview model request failed (${response.status}) for deployment ` +
       `"${deployment}" on "${target.host}": ${detail || response.statusText}`,
     );
   }
-  throw new Error("Architecture model request failed after retrying.");
+  throw new Error("Project overview model request failed after retrying.");
+}
+
+async function serializeImageGeneration<T>(task: () => Promise<T>): Promise<T> {
+  const previous = imageGenerationQueue;
+  let release!: () => void;
+  imageGenerationQueue = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await task();
+  } finally {
+    release();
+  }
 }
 
 function imagePrompt(
@@ -170,32 +215,23 @@ function imagePrompt(
   inputKind: "validated-architecture" | "agent-summary",
 ): string {
   const instructions = [
-    "Create an exceptionally polished, art-directed executive software architecture design graph in a landscape canvas.",
-    "Use a sophisticated editorial information-design style with strong composition, depth, subtle gradients, refined icon-like geometry, and premium presentation quality.",
-    "Use only facts present in the evidence below. Do not invent products, databases, protocols, or integrations.",
+    "Create a polished, simple executive overview on a landscape canvas.",
+    "The compact validated JSON below is the sole factual source; preserve names and connection endpoints.",
     inputKind === "validated-architecture"
-      ? "Use exactly the supplied component names and interaction directions. Preserve spelling."
-      : "Use the agent's analyzed architecture narrative as the sole factual source. Do not add unsupported products.",
-    inputKind === "validated-architecture"
-      ? "When workflow steps are supplied, show a numbered user-workflow lane and map each step to its named platform calls, mechanisms, and outputs."
-      : "Keep the visual centered on the analyzed runtime flow.",
-    "Show 4-6 consolidated high-level components, grouped into 2-4 clear visual areas.",
-    "Merge components with the same deployment boundary or responsibility, and merge consecutive workflow steps with the same user intent or platform.",
-    "Use a two-dimensional presentation layout with 2-3 rows: a short primary flow in the upper or middle row and supporting services, stores, integrations, or outcomes branching below or to the side.",
-    "A single horizontal row of all components is forbidden.",
-    "Fill roughly 80-90% of the usable canvas with the diagram while keeping consistent safe margins.",
-    "Avoid giant empty regions: distribute the primary path and branches across both width and height.",
-    "Use concise readable labels, generous whitespace, clear hierarchy, and no code-level details.",
-    "Never show source file paths, package names, manifests, classes, functions, routes, or implementation citations.",
-    "Prefer product-level components such as User, Web UI, API, Foundry Agent, Storage, and external services.",
-    "Use a professional Azure-inspired palette with excellent contrast; avoid plain white cards in a repetitive horizontal row.",
-    "Every arrow must have a short technical interaction label rendered at clearly readable presentation size; never truncate labels or place tiny text on a line.",
-    "Keep every component, label, and arrow fully inside the canvas with generous safe margins.",
-    "Do not add a watermark, decorative illustration, or explanatory paragraphs.",
+      ? "Choose the composition yourself while keeping the architecture and workflow easy to scan."
+      : "Choose the clearest composition from the narrative.",
+    "Place components that interact directly close together. Do not create large empty corridors for arrows.",
+    "Draw the supplied technicalConnections as short thin orthogonal lines with small arrowheads and at most one bend.",
+    "A technical connector should use no more than about 20% of the canvas width or height; rearrange components instead of extending a long line.",
+    "Show each connection label in a compact badge near an endpoint, not as a paragraph occupying the middle of the line.",
+    "Render workflow steps as one compact sequence. Connect only adjacent workflow steps with short thin arrows.",
+    "Never connect workflow steps to architecture components, platforms, or technical arrows.",
+    "Use short labels, recognizable symbols, generous whitespace, and clear flow.",
+    "Avoid duplicate cards, crossing lines, parallel lines, long text, citations, tiny text, unsupported facts, and watermarks.",
   ].join("\n");
   const evidenceHeading = inputKind === "validated-architecture"
-    ? "\n\nVALIDATED ARCHITECTURE SUMMARY\n"
-    : "\n\nAGENT-ANALYZED ARCHITECTURE NARRATIVE\n";
+    ? "\n\nVALIDATED PROJECT OVERVIEW SUMMARY\n"
+    : "\n\nAGENT-ANALYZED PROJECT OVERVIEW NARRATIVE\n";
   const evidenceBudget =
     MAX_IMAGE_PROMPT_LENGTH - instructions.length - evidenceHeading.length;
   return `${instructions}${evidenceHeading}${evidenceBrief.slice(
@@ -212,7 +248,7 @@ async function imageBytesFromResponse(response: Response): Promise<Uint8Array> {
   if (typeof first?.b64_json === "string" && first.b64_json) {
     const bytes = Buffer.from(first.b64_json, "base64");
     if (bytes.length > MAX_IMAGE_BYTES) {
-      throw new Error("Generated architecture image exceeds the 8 MB limit.");
+      throw new Error("Generated project overview image exceeds the 8 MB limit.");
     }
     return bytes;
   }
@@ -221,15 +257,15 @@ async function imageBytesFromResponse(response: Response): Promise<Uint8Array> {
       signal: AbortSignal.timeout(30_000),
     });
     if (!imageResponse.ok) {
-      throw new Error(`Generated architecture image download failed (${imageResponse.status}).`);
+      throw new Error(`Generated project overview image download failed (${imageResponse.status}).`);
     }
     const length = Number(imageResponse.headers.get("content-length") || 0);
     if (length > MAX_IMAGE_BYTES) {
-      throw new Error("Generated architecture image exceeds the 8 MB limit.");
+      throw new Error("Generated project overview image exceeds the 8 MB limit.");
     }
     const bytes = new Uint8Array(await imageResponse.arrayBuffer());
     if (bytes.length > MAX_IMAGE_BYTES) {
-      throw new Error("Generated architecture image exceeds the 8 MB limit.");
+      throw new Error("Generated project overview image exceeds the 8 MB limit.");
     }
     return bytes;
   }
@@ -240,24 +276,28 @@ export async function generateArchitectureImage(
   evidenceBrief: string,
   inputKind: "validated-architecture" | "agent-summary" =
     "validated-architecture",
+  onRetry?: (notice: ModelRetryNotice) => void,
 ): Promise<Uint8Array> {
   const { deployment, width, height } = architectureImageConfiguration();
-  const response = await modelFetch(
-    deploymentUrl(
-      deployment,
-      "images/generations",
-      configuredValue("ARCHITECTURE_IMAGE_API_VERSION") || "2025-04-01-preview",
-    ),
-    {
-      prompt: imagePrompt(evidenceBrief, inputKind),
-      n: 1,
-      size: `${width}x${height}`,
-      quality: "high",
-      output_format: "png",
-    },
-    IMAGE_TIMEOUT_MS,
-  );
-  return imageBytesFromResponse(response);
+  return serializeImageGeneration(async () => {
+    const response = await modelFetch(
+      deploymentUrl(
+        deployment,
+        "images/generations",
+        configuredValue("ARCHITECTURE_IMAGE_API_VERSION") || "2025-04-01-preview",
+      ),
+      {
+        prompt: imagePrompt(evidenceBrief, inputKind),
+        n: 1,
+        size: `${width}x${height}`,
+        quality: "high",
+        output_format: "png",
+      },
+      IMAGE_TIMEOUT_MS,
+      onRetry,
+    );
+    return imageBytesFromResponse(response);
+  });
 }
 
 function extractJson(content: string): unknown {
@@ -267,7 +307,7 @@ function extractJson(content: string): unknown {
   const start = cleaned.indexOf("{");
   const end = cleaned.lastIndexOf("}");
   if (start < 0 || end <= start) {
-    throw new Error("Vision model returned no architecture layout JSON.");
+    throw new Error("Vision model returned no project overview layout JSON.");
   }
   return JSON.parse(cleaned.slice(start, end + 1));
 }
@@ -290,7 +330,7 @@ export async function parseArchitectureImage(
           {
             type: "text",
             text: [
-              "Reconstruct this architecture diagram as JSON for deterministic SVG rendering.",
+              "Reconstruct this project overview as JSON for deterministic SVG rendering.",
               "Use the image for layout and labels, and the approved evidence to reject hallucinated technology claims.",
               "Return exactly { architecture, layout }.",
               "architecture must contain title, summary, 2-4 layers, 6-10 total high-level nodes, labeled connections, and assumptions.",
@@ -302,7 +342,7 @@ export async function parseArchitectureImage(
               "Each layout connection must use matching from/to ids, 2-6 integer points, labelX, and labelY.",
               "Never return HTML, SVG, CSS, markdown, or URLs.",
               "",
-              "APPROVED ARCHITECTURE EVIDENCE",
+              "APPROVED PROJECT OVERVIEW EVIDENCE",
               evidenceBrief,
             ].join("\n"),
           },
@@ -323,14 +363,14 @@ export async function parseArchitectureImage(
   };
   const content = payload.choices?.[0]?.message?.content;
   if (typeof content !== "string") {
-    throw new Error("Vision model returned no architecture layout content.");
+    throw new Error("Vision model returned no project overview layout content.");
   }
   return extractJson(content);
 }
 
 function integer(value: unknown, minimum: number, maximum: number, label: string): number {
   if (!Number.isInteger(value) || Number(value) < minimum || Number(value) > maximum) {
-    throw new Error(`${label} is outside the architecture canvas.`);
+    throw new Error(`${label} is outside the project overview canvas.`);
   }
   return Number(value);
 }
@@ -341,14 +381,14 @@ export function validateArchitectureVisualLayout(
   connectionKeys: Set<string>,
 ): ArchitectureVisualLayout {
   if (!value || typeof value !== "object") {
-    throw new Error("Architecture visual layout must be an object.");
+    throw new Error("Project overview visual layout must be an object.");
   }
   const source = value as Record<string, unknown>;
   if (source.width !== 1600 || source.height !== 900) {
-    throw new Error("Architecture visual layout must use a 1600x900 canvas.");
+    throw new Error("Project overview visual layout must use a 1600x900 canvas.");
   }
   if (!Array.isArray(source.nodes) || source.nodes.length !== nodeIds.size) {
-    throw new Error("Architecture visual layout must position every component.");
+    throw new Error("Project overview visual layout must position every component.");
   }
   const seen = new Set<string>();
   const nodes = source.nodes.map((rawNode, index) => {
@@ -368,7 +408,7 @@ export function validateArchitectureVisualLayout(
     return { id, x, y, width, height };
   });
   if (!Array.isArray(source.connections) || source.connections.length > 14) {
-    throw new Error("Architecture visual layout has invalid connections.");
+    throw new Error("Project overview visual layout has invalid connections.");
   }
   const connections = source.connections.map((rawConnection, index) => {
     if (!rawConnection || typeof rawConnection !== "object") {
@@ -378,7 +418,7 @@ export function validateArchitectureVisualLayout(
     const from = typeof connection.from === "string" ? connection.from.trim() : "";
     const to = typeof connection.to === "string" ? connection.to.trim() : "";
     if (!connectionKeys.has(`${from}->${to}`)) {
-      throw new Error(`Visual connection ${index + 1} does not match the architecture.`);
+      throw new Error(`Visual connection ${index + 1} does not match the project overview.`);
     }
     if (!Array.isArray(connection.points) ||
         connection.points.length < 2 ||

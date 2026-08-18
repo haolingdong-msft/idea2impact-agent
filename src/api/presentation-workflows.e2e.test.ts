@@ -30,7 +30,7 @@ vi.mock("./architecture-visual.js", () => ({
 }));
 
 const GRAPH = {
-  title: "Presentation Agent",
+  title: "Idea2Impact Agent",
   summary: "A simple workflow from idea to approved presentation assets.",
   layers: [
     {
@@ -140,7 +140,7 @@ const GRAPH = {
     {
       id: "foundry-platform",
       label: "Microsoft Foundry",
-      description: "Hosts the presentation agent.",
+      description: "Hosts Idea2Impact Agent.",
       technology: "Microsoft Foundry",
       componentNodeIds: ["foundry-agent"],
       toolings: [{
@@ -300,18 +300,10 @@ const GRAPH = {
 };
 
 const DECK = {
-  title: "Presentation Agent",
+  title: "Idea2Impact Agent",
   subtitle: "From idea or codebase to an approved presentation.",
   theme: "azure",
   slides: [
-    {
-      id: "title",
-      kind: "title",
-      eyebrow: "Presentation Agent",
-      title: "Tell the technical story faster",
-      subtitle: "Automate post-PoC presentation work.",
-      bullets: [],
-    },
     {
       id: "problem",
       kind: "problem",
@@ -335,14 +327,6 @@ const DECK = {
       title: "Keep presentation assets synchronized",
       subtitle: "",
       bullets: ["One approved outline grounds every generated asset."],
-    },
-    {
-      id: "architecture",
-      kind: "architecture",
-      eyebrow: "Architecture",
-      title: "A simple grounded generation workflow",
-      subtitle: "",
-      bullets: [],
     },
   ],
 };
@@ -391,7 +375,7 @@ async function createProject(
   repositoryUrl?: string,
 ): Promise<ProjectManifest> {
   const response = await request(app).post("/projects").send({
-    title: "Presentation Agent",
+    title: "Idea2Impact Agent",
     idea: "Turn a product idea into an approved technical presentation.",
     audience: "Engineering leaders",
     purpose: "Explain the solution and secure approval",
@@ -431,9 +415,12 @@ async function generatePresentation(
   expect(architecture.status).toBe(200);
   const slides = await request(app).post("/slides").send({ projectId });
   expect(slides.status).toBe(201);
-  expect(slides.body.deck.slides).toHaveLength(5);
-  expect(slides.body.deck.slides.some(
-    (slide: { kind: string }) => slide.kind === "architecture",
+  expect(slides.body.deck.slides).toHaveLength(3);
+  expect(slides.body.deck.slides.map(
+    (slide: { kind: string }) => slide.kind,
+  )).toEqual(["problem", "user-scenarios", "solution"]);
+  expect(slides.body.deck.slides.every(
+    (slide: { imageUrl?: string }) => Boolean(slide.imageUrl),
   )).toBe(true);
   return architecture.body.architecture as typeof GRAPH;
 }

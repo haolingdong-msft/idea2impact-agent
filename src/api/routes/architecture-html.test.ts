@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { rm } from "node:fs/promises";
 import express from "express";
 import request from "supertest";
@@ -27,6 +28,7 @@ vi.mock("../architecture-visual.js", () => ({
 import architectureRoutes from "./architecture.js";
 import {
   generateArchitectureImage,
+  isArchitectureImageConfigured,
   parseArchitectureImage,
 } from "../architecture-visual.js";
 import {
@@ -136,6 +138,7 @@ body{margin:0;background:#eef4ff}.flow{display:grid}
 <section data-component="store">Asset Store</section>
 </main></body></html>`;
 const projectIds: string[] = [];
+let quickSourceSha = "";
 
 function app() {
   const instance = express();
@@ -146,9 +149,44 @@ function app() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  quickSourceSha = "";
   vi.stubEnv("PRESENTATION_AGENT_INVOCATIONS_ENDPOINT", "http://127.0.0.1:8088/invocations");
   vi.stubGlobal("fetch", vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-    const operation = JSON.parse(String(init?.body)).operation;
+    const envelope = JSON.parse(String(init?.body));
+    const operation = envelope.operation;
+    if (operation === "start-images-to-editable-ppt") {
+      quickSourceSha = envelope.input.sourceImages[0].sourceImageSha256;
+      return new Response(JSON.stringify({
+        jobId: "quick-editable-job",
+        status: "running",
+      }), {
+        status: 202,
+        headers: { "x-agent-session-id": "quick-editable-session" },
+      });
+    }
+    if (operation === "editable-ppt-status") {
+      return new Response(JSON.stringify({
+        jobId: "quick-editable-job",
+        status: "completed",
+        invocationId: "skill-invocation-123",
+        runId: "editppt-run-456",
+        workflow: "image-to-editable-ppt",
+        validationPassed: true,
+        sourceImageSha256s: [quickSourceSha],
+        pptxBase64: Buffer.from("PK skill conversion").toString("base64"),
+      }), { status: 200 });
+    }
+    if (operation === "image-to-editable-ppt") {
+      await new Promise(resolve => setTimeout(resolve, 25));
+      return new Response(JSON.stringify({
+        invocationId: "skill-invocation-123",
+        runId: "editppt-run-456",
+        workflow: "image-to-editable-ppt",
+        validationPassed: true,
+        sourceImageSha256: envelope.input.sourceImageSha256,
+        pptxBase64: Buffer.from("PK skill conversion").toString("base64"),
+      }), { status: 200 });
+    }
     const content = ["architecture-html", "architecture-image-html"].includes(operation)
       ? HTML
       : JSON.stringify(GRAPH);
@@ -164,6 +202,34 @@ afterEach(async () => {
 });
 
 describe("architecture image generation", () => {
+  it("supports the start-page shortcut without generating an overview", async () => {
+    const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 4, 5, 6]);
+    const response = await request(app())
+      .post("/editable-pptx")
+      .set("Content-Type", "image/png")
+      .send(png);
+
+    expect(response.status).toBe(202);
+    const invocation = JSON.parse(
+      String((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body),
+    );
+    expect(invocation.operation).toBe("start-images-to-editable-ppt");
+    expect(invocation.input.projectId).toBe("editable-ppt");
+    expect(invocation.input.sourceImages[0].sourceImageBase64)
+      .toBe(png.toString("base64"));
+    const status = await request(app()).get(response.body.statusUrl);
+    expect(status.status, JSON.stringify(status.body)).toBe(200);
+    expect(status.body).toMatchObject({
+      status: "completed",
+      invocationId: "skill-invocation-123",
+      sourceImageSha256: quickSourceSha,
+    });
+    expect(status.body.logs.at(-1)).toContain("Validation passed");
+    const download = await request(app()).get(status.body.downloadUrl);
+    expect(download.status).toBe(200);
+    expect(download.headers["x-source-image-sha256"]).toBe(quickSourceSha);
+  });
+
   it("defers the architecture image until slide generation is requested", async () => {
     const project = await createProject({
       title: "Deferred visuals",
@@ -192,6 +258,45 @@ describe("architecture image generation", () => {
     expect(stored?.currentAssets["architecture-narrative-image"]).toBeUndefined();
   });
 
+  it("uses the validated overview when image generation is not configured", async () => {
+    vi.mocked(isArchitectureImageConfigured).mockReturnValueOnce(false);
+    const project = await createProject({
+      title: "Validated overview fallback",
+      idea: "Show the project overview without optional image model settings.",
+      audience: "Leaders",
+      purpose: "Explain the system",
+    });
+    projectIds.push(project.id);
+    await storeProjectJsonAsset(project.id, "outline", { status: "approved" });
+
+    const response = await request(app()).post("/architecture").send({
+      projectId: project.id,
+      idea: project.brief.idea,
+      generateVisuals: true,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.architecture.title).toBe(GRAPH.title);
+    expect(response.body.visual).toEqual({
+      mode: "legacy",
+      fallbackReason:
+        "Image generation is not configured; showing the validated overview.",
+    });
+    expect(generateArchitectureImage).not.toHaveBeenCalled();
+
+    const progress = await request(app()).get(
+      `/projects/${project.id}/architecture/progress`,
+    );
+    expect(progress.body).toMatchObject({
+      status: "completed",
+      stage: "Validated overview is ready",
+      percent: 100,
+      completedTasks: 0,
+      totalTasks: 0,
+      tasks: [],
+    });
+  });
+
   it("generates and retains only the validated JSON image", async () => {
     const project = await createProject({
       title: "Selected image",
@@ -214,6 +319,8 @@ describe("architecture image generation", () => {
       imageUrl: `/projects/${project.id}/architecture/image`,
       pptxDownloadUrl:
         `/projects/${project.id}/architecture/download.pptx`,
+      pptxGenerateUrl:
+        `/projects/${project.id}/architecture/generate-editable-pptx`,
     });
     expect(generateArchitectureImage).toHaveBeenCalledTimes(1);
     const operations = (fetch as ReturnType<typeof vi.fn>).mock.calls
@@ -240,23 +347,87 @@ describe("architecture image generation", () => {
     const pptx = await request(app()).get(
       `/projects/${project.id}/architecture/download.pptx`,
     );
-    expect(pptx.status).toBe(404);
+    expect(pptx.status).toBe(409);
+    expect(pptx.body.error).toContain("Validated JSON → Image 2");
+
     await storeProjectBinaryAsset(
       project.id,
       "architecture-pptx",
       "pptx",
-      Buffer.from("PK editable architecture"),
-      [stored!.currentAssets["architecture-image"]!],
+      Buffer.from("PK wrong source"),
+      [stored!.currentAssets.architecture!],
+      { conversionWorkflow: "image-to-editable-ppt" },
     );
-    const editablePptx = await request(app()).get(
+    const wrongSource = await request(app()).get(
       `/projects/${project.id}/architecture/download.pptx`,
     );
-    expect(editablePptx.status).toBe(200);
-    expect(editablePptx.headers["content-type"]).toBe(
+    expect(wrongSource.status).toBe(409);
+
+    await storeProjectBinaryAsset(
+      project.id,
+      "architecture-pptx",
+      "pptx",
+      Buffer.from("PK dom conversion"),
+      [stored!.currentAssets["architecture-image"]!],
+      { conversionWorkflow: "dom-to-pptx" },
+    );
+    const wrongWorkflow = await request(app()).get(
+      `/projects/${project.id}/architecture/download.pptx`,
+    );
+    expect(wrongWorkflow.status).toBe(409);
+
+    await storeProjectBinaryAsset(
+      project.id,
+      "architecture-pptx",
+      "pptx",
+      Buffer.from("PK skill conversion"),
+      [stored!.currentAssets["architecture-image"]!],
+      {
+        conversionWorkflow: "image-to-editable-ppt",
+        editpptValidationPassed: true,
+      },
+    );
+    const metadataOnlyClaim = await request(app()).get(
+      `/projects/${project.id}/architecture/download.pptx`,
+    );
+    expect(metadataOnlyClaim.status).toBe(409);
+
+    const [conversion, concurrentConversion] = await Promise.all([
+      request(app()).post(
+        `/projects/${project.id}/architecture/generate-editable-pptx`,
+      ),
+      request(app()).post(
+        `/projects/${project.id}/architecture/generate-editable-pptx`,
+      ),
+    ]);
+    expect(conversion.status).toBe(201);
+    expect(concurrentConversion.status).toBe(201);
+    expect(conversion.body).toMatchObject({
+      invocationId: "skill-invocation-123",
+      runId: "editppt-run-456",
+      downloadUrl: `/projects/${project.id}/architecture/download.pptx`,
+    });
+    const skillInvocations = (fetch as ReturnType<typeof vi.fn>).mock.calls
+      .map(([, init]) => JSON.parse(String((init as RequestInit | undefined)?.body)))
+      .filter(invocation => invocation.operation === "image-to-editable-ppt");
+    expect(skillInvocations).toHaveLength(1);
+    const skillInvocation = skillInvocations[0];
+    expect(skillInvocation.input).toMatchObject({
+      projectId: project.id,
+      sourceAssetId: stored!.currentAssets["architecture-image"],
+      sourceImageMediaType: "image/png",
+    });
+    expect(skillInvocation.input.sourceImageSha256).toMatch(/^[a-f0-9]{64}$/);
+
+    const skillPptx = await request(app()).get(
+      `/projects/${project.id}/architecture/download.pptx`,
+    );
+    expect(skillPptx.status).toBe(200);
+    expect(skillPptx.headers["content-type"]).toBe(
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     );
-    expect(editablePptx.headers["content-disposition"]).toContain(
-      'filename="architecture-editable.pptx"',
+    expect(skillPptx.headers["content-disposition"]).toContain(
+      'filename="presentation-overview-editable.pptx"',
     );
     const progress = await request(app()).get(
       `/projects/${project.id}/architecture/progress`,

@@ -10,6 +10,7 @@ import repositoryRoutes from "./routes/repository.js";
 import githubAuthRoutes from "./routes/github-auth.js";
 import outlineRoutes from "./routes/outline.js";
 import speechRoutes from "./routes/speech.js";
+import slideVideoRoutes from "./routes/slide-video.js";
 import { authorizeProjectRequest } from "./routes/project-authorization.js";
 
 const app = express();
@@ -33,6 +34,7 @@ app.use(repositoryRoutes);
 app.use(outlineRoutes);
 app.use(slideRoutes);
 app.use(speechRoutes);
+app.use(slideVideoRoutes);
 app.use(chatRoutes);
 app.use(architectureRoutes);
 app.use(videoRoutes);

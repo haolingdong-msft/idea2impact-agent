@@ -6,6 +6,7 @@
   --wash: #f4f7fb;
   --navy: #172d50;
   --blue: #3976e8;
+  --indigo: #5968e8;
   --teal: #1f9e97;
   --violet: #7759d6;
   --amber: #d58a26;
@@ -14,43 +15,58 @@
 .app-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 228px minmax(0, 1fr);
+  grid-template-columns: 244px minmax(0, 1fr);
   background:
-    radial-gradient(circle at 82% 4%, rgba(57, 118, 232, 0.09), transparent 28rem),
+    radial-gradient(circle at 86% 0%, rgba(89, 104, 232, 0.14), transparent 30rem),
+    radial-gradient(circle at 62% 22%, rgba(31, 158, 151, 0.07), transparent 24rem),
     var(--wash);
 }
 
 .sidebar {
   min-height: 100vh;
-  padding: 28px 22px;
-  background: #101a2c;
+  padding: 24px 20px;
+  background:
+    radial-gradient(circle at 0 0, rgba(93, 143, 241, 0.24), transparent 15rem),
+    linear-gradient(180deg, #111b33 0%, #0d1628 100%);
   color: #f7f9fd;
   display: flex;
   flex-direction: column;
   position: sticky;
   top: 0;
   height: 100vh;
+  border-right: 1px solid rgba(157, 187, 250, 0.12);
+  box-shadow: 12px 0 34px rgba(24, 39, 68, 0.08);
 }
 
 .brand {
   display: flex;
   align-items: center;
   gap: 12px;
+  margin: -5px -6px 0;
+  padding: 8px 7px;
+  border-radius: 14px;
   color: inherit;
   text-decoration: none;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.brand:hover {
+  background: rgba(255, 255, 255, 0.06);
+  transform: translateY(-1px);
 }
 
 .brand > span,
 .copilot-avatar {
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 11px;
-  background: linear-gradient(145deg, #5d8ff1, #2e5fc4);
-  font: 700 0.72rem/1 "IBM Plex Mono", monospace;
-  letter-spacing: 0.06em;
-  box-shadow: 0 8px 20px rgba(57, 118, 232, 0.28);
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 14px;
+  background: linear-gradient(145deg, #76a3ff 0%, #5968e8 55%, #28b7a8 100%);
+  font: 800 0.62rem/1 "IBM Plex Mono", monospace;
+  letter-spacing: -0.04em;
+  box-shadow: 0 10px 28px rgba(70, 98, 220, 0.36);
 }
 
 .brand div {
@@ -59,12 +75,12 @@
 }
 
 .brand strong {
-  font-size: 0.92rem;
-  letter-spacing: -0.01em;
+  font-size: 0.98rem;
+  letter-spacing: -0.025em;
 }
 
 .brand small {
-  color: #8e9bb2;
+  color: #91a3c3;
   font-size: 0.66rem;
   margin-top: 2px;
 }
@@ -85,6 +101,7 @@
 }
 
 .rail-step {
+  width: 100%;
   min-height: 44px;
   display: grid;
   grid-template-columns: 30px 1fr auto;
@@ -92,8 +109,23 @@
   gap: 8px;
   padding: 7px 9px;
   border-radius: 9px;
+  border: 1px solid transparent;
+  background: transparent;
   color: #7d8ba3;
   font-size: 0.76rem;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rail-step:hover,
+.rail-step.selected {
+  border-color: rgba(117, 214, 201, 0.26);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.rail-step.selected {
+  box-shadow: inset 3px 0 0 #75d6c9;
 }
 
 .rail-step.active {
@@ -137,8 +169,9 @@
 .sidebar-note {
   margin-top: auto;
   padding: 14px;
-  border: 1px solid #28364e;
-  border-radius: 12px;
+  border: 1px solid rgba(126, 157, 215, 0.2);
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(76, 104, 172, 0.14), rgba(31, 158, 151, 0.06));
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -157,22 +190,24 @@
 
 .main-workspace {
   min-width: 0;
-  padding: 28px 34px 34px;
+  padding: 24px 34px 40px;
 }
 
 .workspace-header {
-  min-height: 70px;
+  min-height: 78px;
   display: flex;
   justify-content: space-between;
   gap: 24px;
   align-items: flex-start;
+  padding: 5px 4px 20px;
+  border-bottom: 1px solid rgba(193, 204, 221, 0.72);
 }
 
 .workspace-header h1 {
   margin-top: 6px;
   color: var(--ink);
   font-family: "DM Serif Display", Georgia, serif;
-  font-size: clamp(1.7rem, 2.4vw, 2.45rem);
+  font-size: clamp(1.8rem, 2.55vw, 2.65rem);
   font-weight: 400;
   letter-spacing: -0.025em;
 }
@@ -196,10 +231,10 @@
   align-items: center;
   gap: 7px;
   color: #4f5e74;
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.9);
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 8px 11px;
+  padding: 9px 13px;
   font-size: 0.66rem;
   font-weight: 600;
 }
@@ -240,14 +275,18 @@
 .architecture-empty,
 .architecture-canvas,
 .copilot-panel {
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.94);
   border: 1px solid var(--line);
-  border-radius: 18px;
-  box-shadow: 0 14px 36px rgba(30, 46, 75, 0.06);
+  border-radius: 20px;
+  box-shadow: 0 18px 46px rgba(30, 46, 75, 0.075);
 }
 
 .brief-card {
-  padding: 30px;
+  padding: 32px;
+  border-color: rgba(57, 118, 232, 0.24);
+  background:
+    radial-gradient(circle at 96% 4%, rgba(31, 158, 151, 0.09), transparent 30%),
+    rgba(255, 255, 255, 0.96);
 }
 
 .brief-heading {
@@ -280,26 +319,40 @@
   font: 500 2.6rem/1 "IBM Plex Mono", monospace;
 }
 
-.brief-grid {
+.brief-inputs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  gap: 18px;
 }
 
-.brief-options {
-  margin: 4px 0 18px;
-  padding: 13px 14px 0;
-  background: #f9fbfe;
-  border: 1px solid #e1e7f0;
-  border-radius: 12px;
+.brief-inputs .field {
+  gap: 10px;
+  margin: 0;
+  padding: 17px;
+  border: 1px solid #d6e1f0;
+  border-radius: 15px;
+  background: linear-gradient(135deg, #fbfdff, #f5f9ff);
 }
 
-.brief-options summary {
-  margin-bottom: 13px;
-  color: #526078;
-  cursor: pointer;
-  font-size: 0.7rem;
-  font-weight: 750;
+.brief-inputs .field > span {
+  color: #233b62;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.brief-inputs .field > span small {
+  margin-left: 6px;
+  color: #71809a;
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.brief-inputs textarea {
+  min-height: 170px;
+}
+
+.brief-inputs input {
+  min-height: 50px;
 }
 
 .field {
@@ -562,7 +615,7 @@
 }
 
 .project-layout {
-  margin-top: 26px;
+  margin-top: 22px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
   gap: 20px;
@@ -693,6 +746,11 @@
 .outline-actions {
   align-items: center;
   margin-top: 18px;
+}
+
+.outline-generation-actions {
+  display: flex;
+  gap: 10px;
 }
 
 .outline-actions span {
@@ -832,10 +890,266 @@
   width: fit-content;
   margin-top: 14px;
   padding: 11px 16px;
+  border: 0;
   border-radius: 10px;
   color: #fff;
   background: #0758b8;
   font-weight: 700;
+  cursor: pointer;
+}
+
+.architecture-pptx-download:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.architecture-pptx-progress {
+  width: min(560px, 100%);
+  margin-top: 10px;
+  overflow: hidden;
+}
+
+.architecture-pptx-progress::before {
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background: #dbeafe;
+  content: '';
+}
+
+.architecture-pptx-progress > span {
+  display: block;
+  width: 38%;
+  height: 8px;
+  margin-top: -8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0758b8, #38bdf8);
+  animation: editable-ppt-progress 1.5s ease-in-out infinite;
+}
+
+.architecture-pptx-progress > p {
+  margin: 8px 0 0;
+  color: #39546f;
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+
+@keyframes editable-ppt-progress {
+  0% { transform: translateX(-110%); }
+  50% { transform: translateX(85%); }
+  100% { transform: translateX(265%); }
+}
+
+.architecture-pptx-error {
+  max-width: 760px;
+  margin: 8px 0 0;
+  color: #b42318;
+}
+
+.editable-ppt-quick-test {
+  display: grid;
+  gap: 12px;
+  width: min(760px, 100%);
+  margin-top: 22px;
+  padding: 18px;
+  border: 1px solid #cbd9ee;
+  border-radius: 14px;
+  background: #f7faff;
+}
+
+.editable-ppt-quick-test strong,
+.editable-ppt-quick-test p {
+  display: block;
+  margin: 5px 0 0;
+}
+
+.editable-ppt-quick-test label,
+.editable-ppt-quick-test button {
+  width: fit-content;
+  padding: 9px 13px;
+  border: 1px solid #8faee0;
+  border-radius: 9px;
+  color: #174c9e;
+  background: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.editable-ppt-quick-test input {
+  display: block;
+  margin-top: 8px;
+}
+
+.editable-ppt-quick-test img {
+  display: block;
+  width: 100%;
+  max-height: 460px;
+  object-fit: contain;
+  border: 1px solid #dbe4f2;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.editable-ppt-quick-test button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.slide-video-workspace {
+  margin-top: 24px;
+  padding: 24px;
+  border: 1px solid #cbd9ee;
+  border-radius: 16px;
+  background: linear-gradient(145deg, #f8fbff, #eef5ff);
+}
+
+.slide-video-heading,
+.slide-video-plan > header,
+.slide-video-result .result-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.slide-video-heading h2,
+.slide-video-plan h3,
+.slide-video-result h3 {
+  margin: 6px 0;
+}
+
+.slide-video-heading p,
+.slide-video-result p {
+  max-width: 760px;
+  color: #66748a;
+  line-height: 1.55;
+}
+
+.slide-video-controls {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) 220px auto;
+  gap: 16px;
+  align-items: end;
+  margin-top: 22px;
+}
+
+.slide-video-duration > span {
+  display: block;
+  margin-bottom: 8px;
+  color: #4e6079;
+  font-weight: 700;
+}
+
+.slide-video-duration > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.slide-video-duration input,
+.slide-video-duration select {
+  width: 120px;
+  padding: 12px;
+  border: 1px solid #b9c9df;
+  border-radius: 9px;
+  font: inherit;
+  background: #fff;
+}
+
+.slide-video-progress {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 9px;
+  color: #174c9e;
+  background: #e7f0ff;
+  font-weight: 700;
+}
+
+.slide-video-plan,
+.slide-video-result {
+  margin-top: 22px;
+  padding-top: 22px;
+  border-top: 1px solid #d9e4f3;
+}
+
+.slide-script-list {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.slide-script-list label > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  color: #30445f;
+  font-weight: 800;
+}
+
+.slide-script-list textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid #b9c9df;
+  border-radius: 9px;
+  color: #253149;
+  background: #fff;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.slide-video-downloads {
+  display: flex;
+  gap: 10px;
+}
+
+.slide-video-downloads a {
+  padding: 10px 13px;
+  border-radius: 9px;
+  color: #fff;
+  background: #3976e8;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.slide-video-result video {
+  display: block;
+  width: 100%;
+  max-height: 640px;
+  margin-top: 18px;
+  border-radius: 12px;
+  background: #0c1422;
+}
+
+@media (max-width: 900px) {
+  .slide-video-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .slide-video-heading,
+  .slide-video-plan > header,
+  .slide-video-result .result-heading {
+    flex-direction: column;
+  }
+}
+
+.editable-ppt-lineage {
+  color: #176b4d;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.78rem;
+}
+
+.editable-ppt-logs {
+  max-height: 220px;
+  margin: 0;
+  padding: 12px 12px 12px 34px;
+  overflow: auto;
+  border-radius: 9px;
+  color: #28435f;
+  background: #eef4fc;
+  font: 0.76rem/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-weight: 650;
   text-decoration: none;
 }
 
@@ -1385,20 +1699,24 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border-color: #d9e2ef;
+  box-shadow: 0 20px 48px rgba(35, 50, 82, 0.1);
 }
 
 .copilot-panel > header {
-  padding: 15px 16px;
+  padding: 16px 17px;
   display: flex;
   align-items: center;
   gap: 10px;
   border-bottom: 1px solid var(--line);
+  background: linear-gradient(135deg, rgba(89, 104, 232, 0.08), rgba(31, 158, 151, 0.05));
 }
 
 .copilot-avatar {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   color: #fff;
+  border-radius: 12px;
 }
 
 .copilot-panel header div:last-child {
@@ -1409,12 +1727,34 @@
 
 .copilot-panel header strong {
   color: var(--ink);
-  font-size: 0.72rem;
+  font-size: 0.78rem;
 }
 
 .copilot-panel header span {
   color: var(--muted);
   font-size: 0.56rem;
+}
+
+.copilot-workflow-context {
+  padding: 9px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  background: #f8fbff;
+}
+
+.copilot-workflow-context span {
+  color: var(--muted);
+  font: 600 0.55rem/1 "IBM Plex Mono", monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.copilot-workflow-context strong {
+  color: var(--blue);
+  font-size: 0.64rem;
 }
 
 .story-approval {
@@ -1794,6 +2134,33 @@
   line-height: 1.6;
 }
 
+.slide-generation-progress {
+  margin: 18px 0;
+  padding: 14px 16px;
+  border: 1px solid #cbd9ee;
+  border-radius: 12px;
+  background: #f5f8fe;
+}
+
+.slide-generation-progress > div {
+  display: flex;
+  justify-content: space-between;
+  color: #173f7a;
+}
+
+.slide-generation-progress progress {
+  width: 100%;
+  height: 10px;
+  margin-top: 9px;
+  accent-color: #2d69c4;
+}
+
+.slide-generation-progress p {
+  margin: 7px 0 0;
+  color: #45617e;
+  font-size: 0.82rem;
+}
+
 .asset-badge {
   align-self: flex-start;
   flex: none;
@@ -1858,7 +2225,8 @@
 }
 
 .generate-slides-button,
-.regenerate-slides-button {
+.regenerate-slides-button,
+.create-slide-video-button {
   margin-top: 18px;
   padding: 12px 16px;
   color: #fff;
@@ -1870,7 +2238,8 @@
 }
 
 .generate-slides-button:disabled,
-.regenerate-slides-button:disabled {
+.regenerate-slides-button:disabled,
+.create-slide-video-button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
@@ -1961,6 +2330,85 @@
 }
 
 .slide-preview > ul li {
+  padding: 11px 13px;
+  color: #d8e1ef;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 9px;
+  font-size: 0.65rem;
+  line-height: 1.45;
+}
+
+.slide-preview .slide-story-layout {
+  position: relative;
+  z-index: 1;
+  min-height: 260px;
+  margin-top: 20px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(190px, 0.6fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.slide-preview.has-story-image {
+  justify-content: center;
+  padding: 0;
+  background: #000;
+}
+
+.slide-preview.has-story-image > .slide-index,
+.slide-preview.has-story-image > .eyebrow,
+.slide-preview.has-story-image > h3,
+.slide-preview.has-story-image > p {
+  display: none;
+}
+
+.slide-preview.has-story-image .slide-story-layout {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin-top: 0;
+  align-items: center;
+}
+
+.slide-preview .slide-story-image {
+  width: 100%;
+  height: 100%;
+  min-height: 260px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.035);
+  border-radius: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.slide-preview .slide-story-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  object-position: center;
+}
+
+.slide-preview.has-story-image .slide-story-image {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.slide-preview .slide-story-layout ul {
+  display: grid;
+  align-content: center;
+  gap: 9px;
+  list-style: none;
+}
+
+.slide-preview .slide-story-layout li {
   padding: 11px 13px;
   color: #d8e1ef;
   background: rgba(255, 255, 255, 0.07);
@@ -2109,14 +2557,22 @@
   gap: 6px;
 }
 
-.deck-actions a {
+.deck-actions a,
+.deck-actions button {
   padding: 7px 8px;
   color: #315fba;
   background: #edf3ff;
+  border: 0;
   border-radius: 7px;
   font-size: 0.56rem;
   font-weight: 700;
   text-decoration: none;
+  cursor: pointer;
+}
+
+.deck-actions button:disabled {
+  cursor: wait;
+  opacity: 0.7;
 }
 
 .slide-thumbnails {
@@ -2177,6 +2633,15 @@
   margin-top: 11px;
   padding: 10px;
   font-size: 0.62rem;
+}
+
+.create-slide-video-button {
+  width: 100%;
+  margin-top: 8px;
+  padding: 11px;
+  color: #fff;
+  background: #3976e8;
+  font-size: 0.64rem;
 }
 
 .video-workspace {
@@ -2601,11 +3066,6 @@
 
   .header-actions {
     justify-content: space-between;
-  }
-
-  .brief-grid {
-    grid-template-columns: 1fr;
-    gap: 0;
   }
 
   .onboarding-layout {

@@ -27,9 +27,22 @@ afterEach(async () => {
 
 describe("outline routes", () => {
   it("requires repository evidence to populate all three fields automatically", () => {
-    expect(OUTLINE_PROMPT).toContain("summarize the codebase into all three");
+    expect(OUTLINE_PROMPT).toContain("summarize the product into all three");
     expect(OUTLINE_PROMPT).toContain("Do not wait for additional user answers");
     expect(OUTLINE_PROMPT).toContain("Mark product intent");
+    expect(OUTLINE_PROMPT).toContain(
+      "Solution may use up to three short sentences or",
+    );
+    expect(OUTLINE_PROMPT).toContain("Never include source filenames");
+    expect(OUTLINE_PROMPT).toContain(
+      "Experience, Capabilities,\n  Platforms, Integrations, and Constraints",
+    );
+    expect(OUTLINE_PROMPT).toContain(
+      "name the material platforms and their key toolings/components",
+    );
+    expect(OUTLINE_PROMPT).toContain(
+      "Hosted Agent calls\n  the GitHub Copilot SDK component",
+    );
   });
 
   it("generates all three initial fields from an idea without repository evidence", () => {

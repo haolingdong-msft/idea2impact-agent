@@ -20,6 +20,7 @@ export function useService() {
     brief?: PresentationBrief,
     projectId?: string,
     workflowMode: 'initial' | 'refinement' = 'initial',
+    workflowContext?: string,
   ) => {
     // Abort any in-flight request
     abortRef.current?.abort()
@@ -54,7 +55,9 @@ export function useService() {
                 `Repository: ${brief.repositoryUrl || 'Not provided'}`,
                 `Idea: ${text}`,
               ].join('\n')
-            : text,
+            : workflowContext
+              ? `${workflowContext}\n\nUser request: ${text}`
+              : text,
           history: history.length > 0 ? history : undefined,
           projectId,
           workflowMode,

@@ -35,6 +35,7 @@ export function useOutline() {
   const [outline, setOutline] = useState<PresentationOutline | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isApproving, setIsApproving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -117,7 +118,7 @@ export function useOutline() {
       clearTimeout(saveTimer.current)
       saveTimer.current = null
     }
-    setIsSaving(true)
+    setIsApproving(true)
     setError(null)
     try {
       await saveDraft(projectId, value)
@@ -135,7 +136,7 @@ export function useOutline() {
       setError(message)
       throw caught
     } finally {
-      setIsSaving(false)
+      setIsApproving(false)
     }
   }, [outline, saveDraft])
 
@@ -150,6 +151,7 @@ export function useOutline() {
     outline,
     isGenerating,
     isSaving,
+    isApproving,
     error,
     generateOutline,
     updateOutline,

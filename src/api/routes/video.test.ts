@@ -109,7 +109,7 @@ describe("video routes", () => {
 
   it("stores source and refined assets when a project ID is provided", async () => {
     const project = await createProject({
-      title: "Presentation Agent",
+      title: "Idea2Impact Agent",
       idea: "Create a traceable workflow from idea to polished recording.",
       audience: "Engineering leaders",
       purpose: "Demonstrate MVP lineage",
@@ -141,7 +141,7 @@ describe("video routes", () => {
 
   it("separates source upload from stored-asset refinement", async () => {
     const project = await createProject({
-      title: "Presentation Agent",
+      title: "Idea2Impact Agent",
       idea: "Upload a recording before creating a separate refined output.",
       audience: "Engineering leaders",
       purpose: "Demonstrate staged video processing",

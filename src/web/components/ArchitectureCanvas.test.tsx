@@ -1,10 +1,11 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
-import { ArchitectureCanvas } from './ArchitectureCanvas'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, it, vi } from 'vitest'
+import { ArchitectureCanvas, EditablePptQuickTest } from './ArchitectureCanvas'
 import type { ArchitectureGraph } from '../types'
 
 const architecture: ArchitectureGraph = {
-  title: 'Presentation Agent Architecture',
+  title: 'Idea2Impact Agent Architecture',
   summary: 'Copilot structures an idea into a browser-rendered graph.',
   layers: [
     {
@@ -125,7 +126,7 @@ describe('ArchitectureCanvas', () => {
       <ArchitectureCanvas architecture={architecture} visual={null} isLoading={false} error={null} />,
     )
 
-    expect(screen.getByText('Presentation Agent Architecture')).toBeInTheDocument()
+    expect(screen.getByText('Idea2Impact Agent Architecture')).toBeInTheDocument()
     expect(screen.getByText('Experience')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Web Workspace' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Copilot Agent' })).toBeInTheDocument()
@@ -160,13 +161,13 @@ describe('ArchitectureCanvas', () => {
       />,
     )
 
-    const frame = screen.getByTitle('Presentation Agent Architecture architecture diagram')
+    const frame = screen.getByTitle('Idea2Impact Agent Architecture overview diagram')
     expect(frame).toHaveAttribute('src', '/architecture.html')
     expect(frame).toHaveAttribute('sandbox')
     expect(screen.getByText('Creative / non-deterministic')).toBeInTheDocument()
   })
 
-  it('renders the single image option with an editable PPTX download', () => {
+  it('shows the overview image without an editable PPT action', () => {
     render(
       <ArchitectureCanvas
         architecture={architecture}
@@ -174,6 +175,7 @@ describe('ArchitectureCanvas', () => {
           mode: 'image',
           imageUrl: '/architecture.png',
           pptxDownloadUrl: '/architecture.pptx',
+          pptxGenerateUrl: '/architecture/generate-editable-pptx',
         }}
         selectedMode="image"
         isLoading={false}
@@ -182,11 +184,141 @@ describe('ArchitectureCanvas', () => {
     )
 
     expect(screen.getByAltText(
-      'Presentation Agent Architecture architecture design graph',
+      'Idea2Impact Agent Architecture overview design graph',
     )).toHaveAttribute('src', '/architecture.png')
-    expect(screen.getByRole('link', { name: 'Download editable PPTX' }))
-      .toHaveAttribute('href', '/architecture.pptx')
-    expect(screen.queryByRole('button', { name: 'Full context → HTML/CSS' }))
+    expect(screen.queryByRole('button', { name: /editable overview/i }))
       .not.toBeInTheDocument()
+  })
+
+  it('sends the exact uploaded PNG directly to the editable PPT skill', async () => {
+    const png = new File(
+      [new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3])],
+      'architecture.png',
+      { type: 'image/png' },
+    )
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: 'running',
+        statusUrl: '/editable-pptx/job-1',
+        logs: ['Upload accepted'],
+      }), { status: 202 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: 'completed',
+        invocationId: 'skill-direct-123',
+        sourceImageSha256:
+          '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        downloadUrl: '/editable-pptx/job-1/download',
+        logs: ['Upload accepted', 'Validation passed'],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response('PK editable ppt', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const createObjectUrl = vi.fn()
+      .mockReturnValueOnce('blob:uploaded-preview')
+      .mockReturnValueOnce('blob:editable-pptx')
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: createObjectUrl,
+      revokeObjectURL: vi.fn(),
+    })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => undefined)
+    render(
+      <EditablePptQuickTest
+        endpoint="/editable-pptx"
+      />,
+    )
+
+    await userEvent.upload(screen.getByLabelText('Choose PNG'), png)
+    expect(screen.getByAltText('Exact PNG selected for editable PPT conversion'))
+      .toHaveAttribute('src', 'blob:uploaded-preview')
+    await userEvent.click(screen.getByRole('button', { name: 'Download as PPT' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/editable-pptx',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'image/png' },
+        body: png,
+      },
+    ))
+    expect(click).toHaveBeenCalled()
+    expect(await screen.findByText(/Skill skill-direct-123/)).toBeInTheDocument()
+    vi.unstubAllGlobals()
+  })
+
+  it('downloads the preloaded start-page architecture image without overview generation', async () => {
+    const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 7, 8, 9])
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(png, { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: 'running',
+        statusUrl: '/editable-pptx/job-2',
+        logs: ['Foundry job started'],
+      }), { status: 202 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: 'completed',
+        invocationId: 'skill-start-page',
+        sourceImageSha256:
+          'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
+        downloadUrl: '/editable-pptx/job-2/download',
+        logs: ['Foundry job started', 'Validation passed'],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response('PK editable ppt', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:editable-pptx'),
+      revokeObjectURL: vi.fn(),
+    })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    render(
+      <EditablePptQuickTest
+        endpoint="/editable-pptx"
+        initialImageUrl="/architecture-editable-ppt-test.png"
+      />,
+    )
+
+    expect(screen.getByAltText('Exact PNG selected for editable PPT conversion'))
+      .toHaveAttribute('src', '/architecture-editable-ppt-test.png')
+    await userEvent.click(screen.getByRole('button', { name: 'Download as PPT' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/architecture-editable-ppt-test.png',
+    ))
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/editable-pptx',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'image/png' },
+      }),
+    )
+    expect(await screen.findByText(/Skill skill-start-page/)).toBeInTheDocument()
+    vi.unstubAllGlobals()
+  })
+
+  it('reports an empty proxy failure without attempting to parse JSON', async () => {
+    const png = new File(
+      [new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])],
+      'architecture.png',
+      { type: 'image/png' },
+    )
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, {
+      status: 504,
+    })))
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:preview'),
+      revokeObjectURL: vi.fn(),
+    })
+    render(<EditablePptQuickTest endpoint="/editable-pptx" />)
+
+    await userEvent.upload(screen.getByLabelText('Choose PNG'), png)
+    await userEvent.click(screen.getByRole('button', { name: 'Download as PPT' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Skill invocation failed (504).',
+    )
+    expect(screen.queryByText(/Unexpected end of JSON input/)).not.toBeInTheDocument()
+    vi.unstubAllGlobals()
   })
 })

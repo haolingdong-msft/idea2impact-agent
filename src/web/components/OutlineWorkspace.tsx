@@ -3,11 +3,14 @@ import type { PresentationOutline } from '../types'
 interface Props {
   outline: PresentationOutline | null
   isBusy: boolean
+  isGeneratingOutline: boolean
+  isApproving: boolean
   isSaving: boolean
   error: string | null
+  isGeneratingOverview: boolean
   onChange: (outline: PresentationOutline) => void
   onApprove: () => void
-  onGenerate: () => void
+  onGenerateOverview: () => void
 }
 
 const SECTIONS: Array<{
@@ -32,18 +35,21 @@ const SECTIONS: Array<{
     key: 'solution',
     number: '03',
     label: 'Solution',
-    help: 'Experience, capabilities, platforms, integrations, and constraints.',
+    help: 'Platforms, key tooling/components, high-level connections, capabilities, and constraints.',
   },
 ]
 
 export function OutlineWorkspace({
   outline,
   isBusy,
+  isGeneratingOutline,
+  isApproving,
   isSaving,
   error,
+  isGeneratingOverview,
   onChange,
   onApprove,
-  onGenerate,
+  onGenerateOverview,
 }: Props) {
   const value = outline || {
     problemStatement: '',
@@ -58,8 +64,8 @@ export function OutlineWorkspace({
     <section className={`outline-workspace ${approved ? 'approved' : ''}`}>
       <header className="outline-heading">
         <div>
-          <span className="eyebrow">Central outline / One source of truth</span>
-          <h2>Shape the complete presentation story</h2>
+          <span className="eyebrow">Step 01 / Start story</span>
+          <h2>Shape the complete story</h2>
           <p>
             Edit directly or answer Copilot in chat. All three sections stay synchronized
             and are approved together.
@@ -97,12 +103,16 @@ export function OutlineWorkspace({
       <footer className="outline-actions">
         <span>
           {approved
-            ? 'This approved revision now grounds architecture and slides.'
+            ? 'This approved revision now grounds the overview and slides.'
             : 'Approval locks the current revision for downstream generation.'}
         </span>
         {approved ? (
-          <button type="button" onClick={onGenerate} disabled={isBusy}>
-            {isBusy ? 'Generating slides...' : 'Generate slides + 3 designs'}
+          <button
+            type="button"
+            onClick={onGenerateOverview}
+            disabled={isBusy}
+          >
+            {isGeneratingOverview ? 'Generating overview image...' : 'Generate overview image'}
           </button>
         ) : (
           <button
@@ -110,7 +120,11 @@ export function OutlineWorkspace({
             onClick={onApprove}
             disabled={!complete || isBusy || isSaving}
           >
-            {isBusy ? 'Approving...' : 'Approve complete outline'}
+            {isApproving
+              ? 'Approving...'
+              : isGeneratingOutline
+                ? 'Generating outline...'
+                : 'Complete story'}
           </button>
         )}
       </footer>

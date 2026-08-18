@@ -226,6 +226,12 @@ describe("POST /chat", () => {
         "Never ask what the user wants done with the repository",
       );
       expect(instructions).toContain("Never offer to run tests");
+      expect(instructions).toContain(
+        "name each material platform and the key tooling",
+      );
+      expect(instructions).toContain(
+        "agent calls the GitHub Copilot SDK component",
+      );
       expect(session.send).toHaveBeenCalledWith({
         prompt: expect.stringContaining("NO REPOSITORY EVIDENCE WAS PROVIDED"),
       });

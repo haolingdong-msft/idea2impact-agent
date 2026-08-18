@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+const apiTarget = process.env.VITE_API_PROXY_TARGET || 'http://localhost:3000'
+
 export default defineConfig({
   plugins: [react()],
   build: {
@@ -9,22 +11,32 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/chat': 'http://localhost:3000',
-      '/config': 'http://localhost:3000',
-      '/health': 'http://localhost:3000',
-      '/auth': 'http://localhost:3000',
+      '/chat': apiTarget,
+      '/config': apiTarget,
+      '/health': apiTarget,
+      '/auth': apiTarget,
       '/architecture': {
-        target: 'http://localhost:3000',
+        target: apiTarget,
         timeout: 600_000,
         proxyTimeout: 600_000,
       },
-      '/projects': 'http://localhost:3000',
+      '/projects': apiTarget,
       '/slides': {
-        target: 'http://localhost:3000',
+        target: apiTarget,
         timeout: 600_000,
         proxyTimeout: 600_000,
       },
-      '/video': 'http://localhost:3000',
+      '/editable-pptx': {
+        target: apiTarget,
+        timeout: 1_200_000,
+        proxyTimeout: 1_200_000,
+      },
+      '/video': apiTarget,
+      '/slide-video': {
+        target: apiTarget,
+        timeout: 1_800_000,
+        proxyTimeout: 1_800_000,
+      },
     },
   },
 })

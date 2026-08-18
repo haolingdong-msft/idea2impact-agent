@@ -61,8 +61,8 @@ export function ChatWindow({ messages, isStreaming }: Props) {
     return (
       <div className="messages">
         <div className="empty-state">
-          <span>PA</span>
-          <strong>Architecture copilot</strong>
+          <span aria-label="Idea2Impact Agent">I2I</span>
+          <strong>Idea2Impact Copilot</strong>
           <p>Start with the brief, then use chat to challenge assumptions and refine the design.</p>
         </div>
       </div>

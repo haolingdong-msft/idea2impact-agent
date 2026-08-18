@@ -23,7 +23,7 @@ export function SpeechWorkspace({
     <section className="speech-workspace" aria-labelledby="speech-workspace-title">
       <header>
         <div>
-          <span className="eyebrow">Step 06 / Generate speech</span>
+          <span className="eyebrow">Step 04 / Video narration</span>
           <h2 id="speech-workspace-title">Create speaker notes from the slides</h2>
           <p>
             Copilot turns each slide into an editable spoken script. This step creates

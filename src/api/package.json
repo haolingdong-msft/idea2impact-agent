@@ -22,6 +22,7 @@
     "cors": "^2.8.6",
     "dom-to-pptx": "2.1.1",
     "express": "^5.2.1",
+    "pptxgenjs": "4.0.1",
     "puppeteer": "25.5.0"
   },
   "devDependencies": {

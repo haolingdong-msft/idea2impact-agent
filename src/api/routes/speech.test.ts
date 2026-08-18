@@ -20,11 +20,11 @@ import speechRoutes, { validateSpeechScript } from "./speech.js";
 import type { SlideDeck } from "./slides.js";
 
 const DECK: SlideDeck = {
-  title: "Presentation Agent",
+  title: "Idea2Impact Agent",
   subtitle: "One outline to finished assets.",
   theme: "azure",
   slides: [
-    { id: "title", kind: "title", eyebrow: "", title: "Presentation Agent", subtitle: "", bullets: [] },
+    { id: "title", kind: "title", eyebrow: "", title: "Idea2Impact Agent", subtitle: "", bullets: [] },
     { id: "problem", kind: "problem", eyebrow: "", title: "The problem", subtitle: "", bullets: ["Manual handoffs lose context."] },
     { id: "scenarios", kind: "user-scenarios", eyebrow: "", title: "User scenarios", subtitle: "", bullets: ["Presenters refine one outline."] },
     { id: "solution", kind: "solution", eyebrow: "", title: "The solution", subtitle: "", bullets: ["One workflow versions every asset."] },
@@ -33,7 +33,7 @@ const DECK: SlideDeck = {
 };
 
 const SCRIPT = {
-  title: "Presentation Agent speaker notes",
+  title: "Idea2Impact Agent speaker notes",
   notes: DECK.slides.map(slide => ({
     slideId: slide.id,
     slideTitle: slide.title,
@@ -67,7 +67,7 @@ describe("speech script routes", () => {
 
   it("generates and stores speaker notes with outline and deck lineage", async () => {
     const project = await createProject({
-      title: "Presentation Agent",
+      title: "Idea2Impact Agent",
       idea: "Generate editable speaker notes from an approved slide deck.",
       audience: "Engineering leaders",
       purpose: "Prepare a talk track",

@@ -14,7 +14,7 @@ export function ArchitectureModeSwitcher({
   onSelectedModeChange,
 }: Props) {
   return (
-    <div className="architecture-mode-switcher" role="group" aria-label="Architecture visual">
+    <div className="architecture-mode-switcher" role="group" aria-label="Overview visual">
       {OPTIONS.map(option => (
         <button
           type="button"

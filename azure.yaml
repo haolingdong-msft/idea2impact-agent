@@ -32,8 +32,8 @@ services:
                 memory: 2Gi
         kind: hosted
         name: presentation-agent
-        displayName: Presentation Agent
-        description: Guides users through an approved technical story, architecture, and slide deck.
+        displayName: Idea2Impact Agent
+        description: Guides users through an approved technical story, project overview, and slide deck.
         protocols:
             - protocol: invocations
               version: 2.0.0
@@ -42,6 +42,14 @@ services:
               value: ${GITHUB_TOKEN_SECRET_URI}
             - name: MODEL_NAME
               value: gpt-5.6-sol
+            - name: ARCHITECTURE_MODEL_ENDPOINT
+              value: ${ARCHITECTURE_MODEL_ENDPOINT}
+            - name: ARCHITECTURE_IMAGE_DEPLOYMENT
+              value: ${ARCHITECTURE_IMAGE_DEPLOYMENT}
+            - name: ARCHITECTURE_IMAGE_API_VERSION
+              value: ${ARCHITECTURE_IMAGE_API_VERSION=2025-04-01-preview}
+            - name: ARCHITECTURE_MODEL_API_KEY_SECRET_URI
+              value: ${ARCHITECTURE_MODEL_API_KEY_SECRET_URI}
         startupCommand: node dist/index.js
     proj-default:
         host: azure.ai.project

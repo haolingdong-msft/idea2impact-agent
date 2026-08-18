@@ -1,6 +1,7 @@
 node_modules/
 dist/
 coverage/
+tests/integration/artifacts/
 .azure/
 .env
 *.log

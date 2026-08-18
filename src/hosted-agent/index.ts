@@ -17,15 +17,27 @@ import {
   SPEECH_SCRIPT_PROMPT,
   SLIDE_DECK_PROMPT,
 } from "./presentation-instructions.js";
+import {
+  convertImageToEditablePpt,
+  convertImagesToEditablePpt,
+} from "./editable-ppt-skill.js";
 
 type HistoryItem = { role: "user" | "assistant"; content: string };
-type Operation = "chat" | "outline" | "architecture" | "architecture-html" | "architecture-image-html" | "architecture-brief" | "slides" | "speech-script";
+type Operation = "chat" | "outline" | "architecture" | "architecture-html" | "architecture-image-html" | "architecture-brief" | "slides" | "speech-script" | "image-to-editable-ppt" | "images-to-editable-ppt" | "start-images-to-editable-ppt" | "editable-ppt-status";
 type Invocation = {
   version: "1.0";
   operation: Operation;
   requestId?: string;
   input: Record<string, unknown>;
 };
+
+type EditablePptJob = {
+  status: "running" | "completed" | "failed";
+  result?: Awaited<ReturnType<typeof convertImagesToEditablePpt>>;
+  error?: string;
+};
+
+const editablePptJobs = new Map<string, EditablePptJob>();
 
 type StreamingSession = {
   on(event: string, callback: (event: unknown) => void): () => void;
@@ -73,7 +85,7 @@ function architectureImageBytes(input: Record<string, unknown>): Buffer {
     typeof input.imageBase64 !== "string" ||
     !/^[A-Za-z0-9+/]+={0,2}$/.test(input.imageBase64)
   ) {
-    throw new Error("Architecture image HTML requires a valid PNG attachment.");
+    throw new Error("Project overview image HTML requires a valid PNG attachment.");
   }
   const bytes = Buffer.from(input.imageBase64, "base64");
   if (
@@ -83,7 +95,7 @@ function architectureImageBytes(input: Record<string, unknown>): Buffer {
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     )
   ) {
-    throw new Error("Architecture image HTML requires a PNG under 8 MB.");
+    throw new Error("Project overview image HTML requires a PNG under 8 MB.");
   }
   return bytes;
 }
@@ -119,7 +131,7 @@ function parseInvocation(body: unknown): Invocation {
   if (candidate.version !== VERSION) {
     throw new Error(`Unsupported invocation version. Expected "${VERSION}".`);
   }
-  if (!["chat", "outline", "architecture", "architecture-html", "architecture-image-html", "architecture-brief", "slides", "speech-script"].includes(String(candidate.operation))) {
+  if (!["chat", "outline", "architecture", "architecture-html", "architecture-image-html", "architecture-brief", "slides", "speech-script", "image-to-editable-ppt", "images-to-editable-ppt", "start-images-to-editable-ppt", "editable-ppt-status"].includes(String(candidate.operation))) {
     throw new Error("Unsupported invocation operation.");
   }
   if (!candidate.input || typeof candidate.input !== "object") {
@@ -207,9 +219,10 @@ async function sendStructured(
       }),
       session.on("assistant.message", event => {
         const content =
-          (event as { data?: { content?: string } }).data?.content ??
-          streamedContent;
-        finish(content);
+          (event as { data?: { content?: string } }).data?.content;
+        finish(typeof content === "string" && content.trim()
+          ? content
+          : streamedContent);
       }),
       session.on("session.idle", () => finish(streamedContent)),
       session.on("session.error", event => {
@@ -332,8 +345,8 @@ function structuredPrompt(invocation: Invocation): string {
   }
   if (invocation.operation === "architecture-brief") {
     const idea = text(invocation.input.idea, 12_000);
-    if (idea.length < 10) {
-      throw new Error("Architecture brief requires an idea of at least 10 characters.");
+    if (!idea) {
+      throw new Error("Project overview brief requires a non-empty idea.");
     }
     return [
       ARCHITECTURE_IMAGE_BRIEF_PROMPT,
@@ -350,8 +363,8 @@ function structuredPrompt(invocation: Invocation): string {
     invocation.operation === "architecture-image-html"
   ) {
     const idea = text(invocation.input.idea, 12_000);
-    if (idea.length < 10) {
-      throw new Error("Architecture HTML requires an idea of at least 10 characters.");
+    if (!idea) {
+      throw new Error("Project overview HTML requires a non-empty idea.");
     }
     const prompt = [
       invocation.operation === "architecture-image-html"
@@ -384,8 +397,8 @@ function structuredPrompt(invocation: Invocation): string {
   }
   if (invocation.operation === "architecture") {
     const idea = text(invocation.input.idea, 12_000);
-    if (idea.length < 10) {
-      throw new Error("Architecture requires an idea of at least 10 characters.");
+    if (!idea) {
+      throw new Error("Project overview requires a non-empty idea.");
     }
     const prompt = [
       ARCHITECTURE_GRAPH_PROMPT,
@@ -429,6 +442,12 @@ function structuredPrompt(invocation: Invocation): string {
     }
     return [
       SPEECH_SCRIPT_PROMPT,
+      Number.isFinite(Number(invocation.input.targetDurationSeconds))
+        ? `TARGET VIDEO DURATION: ${Number(invocation.input.targetDurationSeconds)} seconds.`
+        : "Target video duration: Not specified.",
+      Number.isFinite(Number(invocation.input.targetWords))
+        ? `TARGET TOTAL NARRATION LENGTH: about ${Number(invocation.input.targetWords)} words.`
+        : "Target narration length: Not specified.",
       "APPROVED OUTLINE",
       JSON.stringify(outline),
       "SLIDE DECK",
@@ -440,7 +459,7 @@ function structuredPrompt(invocation: Invocation): string {
   const outline = invocation.input.outline;
   const architecture = invocation.input.architecture;
   if (!brief || !outline || !architecture) {
-    throw new Error("Slides require brief, outline, and architecture inputs.");
+    throw new Error("Slides require brief, outline, and project overview inputs.");
   }
   return [
     SLIDE_DECK_PROMPT,
@@ -480,7 +499,7 @@ async function handleStructured(
           return [{
             type: "file" as const,
             path: imagePath,
-            displayName: "GPT-Image-2 architecture reference.png",
+            displayName: "GPT-Image-2 project overview reference.png",
           }];
         })()
       : undefined;
@@ -504,9 +523,9 @@ async function handleStructured(
     const enhanced = enhanceModelError(error);
     const status =
       enhanced.message.startsWith("Slides require") ||
-      enhanced.message.startsWith("Architecture requires") ||
-      enhanced.message.startsWith("Architecture brief requires") ||
-      enhanced.message.startsWith("Architecture HTML requires")
+      enhanced.message.startsWith("Project overview requires") ||
+      enhanced.message.startsWith("Project overview brief requires") ||
+      enhanced.message.startsWith("Project overview HTML requires")
         ? 400
         : 502;
     response.status(status).json({ error: enhanced.message });
@@ -532,6 +551,124 @@ export async function invoke(request: Request, response: Response): Promise<void
     await handleChat(invocation, response);
     return;
   }
+  if (invocation.operation === "editable-ppt-status") {
+    const jobId = text(invocation.input.jobId, 100);
+    const job = editablePptJobs.get(jobId);
+    if (!job) {
+      response.status(404).json({ error: "Editable PPT job not found." });
+      return;
+    }
+    if (job.status === "running") {
+      response.status(202).json({ jobId, status: job.status });
+      return;
+    }
+    if (job.status === "failed") {
+      response.status(500).json({ jobId, status: job.status, error: job.error });
+      return;
+    }
+    response.json({ jobId, status: job.status, ...job.result });
+    return;
+  }
+  if (
+    invocation.operation === "images-to-editable-ppt" ||
+    invocation.operation === "start-images-to-editable-ppt"
+  ) {
+    const projectId = text(invocation.input.projectId, 100);
+    const sourceImages = Array.isArray(invocation.input.sourceImages)
+      ? invocation.input.sourceImages
+      : [];
+    const inputs = sourceImages.map((value) => {
+      const image = value && typeof value === "object"
+        ? value as Record<string, unknown>
+        : {};
+      return {
+        projectId,
+        sourceAssetId: text(image.sourceAssetId, 100),
+        sourceImageBase64: text(image.sourceImageBase64, 12 * 1024 * 1024),
+        sourceImageSha256: text(image.sourceImageSha256, 64).toLowerCase(),
+      };
+    });
+    if (
+      !projectId ||
+      inputs.length < 1 ||
+      inputs.length > 12 ||
+      inputs.some(input =>
+        !input.sourceAssetId ||
+        !input.sourceImageBase64 ||
+        !/^[a-f0-9]{64}$/.test(input.sourceImageSha256))
+    ) {
+      response.status(400).json({
+        error:
+          "images-to-editable-ppt requires 1-12 source assets with PNG data and SHA-256 values.",
+      });
+      return;
+    }
+    if (invocation.operation === "start-images-to-editable-ppt") {
+      const jobId = randomUUID();
+      editablePptJobs.set(jobId, { status: "running" });
+      void convertImagesToEditablePpt(inputs)
+        .then(result => {
+          editablePptJobs.set(jobId, { status: "completed", result });
+        })
+        .catch(error => {
+          editablePptJobs.set(jobId, {
+            status: "failed",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      response.status(202).json({ jobId, status: "running" });
+      return;
+    }
+    try {
+      response.json(await convertImagesToEditablePpt(inputs));
+    } catch (error) {
+      response.status(500).json({
+        error:
+          error instanceof Error
+            ? `images-to-editable-ppt failed: ${error.message}`
+            : "images-to-editable-ppt failed.",
+      });
+    }
+    return;
+  }
+  if (invocation.operation === "image-to-editable-ppt") {
+    const projectId = text(invocation.input.projectId, 100);
+    const sourceAssetId = text(invocation.input.sourceAssetId, 100);
+    const sourceImageBase64 = text(
+      invocation.input.sourceImageBase64,
+      12 * 1024 * 1024,
+    );
+    const sourceImageSha256 = text(invocation.input.sourceImageSha256, 64)
+      .toLowerCase();
+    if (
+      !projectId ||
+      !sourceAssetId ||
+      !sourceImageBase64 ||
+      !/^[a-f0-9]{64}$/.test(sourceImageSha256)
+    ) {
+      response.status(400).json({
+        error:
+          "image-to-editable-ppt requires project, source asset, PNG, and SHA-256 inputs.",
+      });
+      return;
+    }
+    try {
+      response.json(await convertImageToEditablePpt({
+        projectId,
+        sourceAssetId,
+        sourceImageBase64,
+        sourceImageSha256,
+      }));
+    } catch (error) {
+      response.status(500).json({
+        error:
+          error instanceof Error
+            ? `image-to-editable-ppt failed: ${error.message}`
+            : "image-to-editable-ppt failed.",
+      });
+    }
+    return;
+  }
   await handleStructured(invocation, response);
 }
 
@@ -546,6 +683,6 @@ export { app };
 if (process.env.NODE_ENV !== "test") {
   const port = Number(process.env.PORT || 8088);
   app.listen(port, "0.0.0.0", () => {
-    console.log(`Presentation Hosted Agent listening on port ${port}`);
+    console.log(`Idea2Impact Hosted Agent listening on port ${port}`);
   });
 }

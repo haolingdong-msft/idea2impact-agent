@@ -37,10 +37,15 @@ export function useProject() {
     }
   }, [])
 
+  const clearError = useCallback(() => {
+    setError(null)
+  }, [])
+
   return {
     project,
     isSaving,
     error,
+    clearError,
     createPresentationProject,
   }
 }

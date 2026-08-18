@@ -74,7 +74,7 @@ export function VideoWorkspace({
       <header className="video-heading">
         <div>
           <span className="eyebrow">
-            {standalone ? 'Start directly / Video polish' : 'Steps 07-08 / Recording'}
+            {standalone ? 'Start directly / Generate video' : 'Step 04 / Generate video'}
           </span>
           <h2 id="video-workspace-title">
             {standalone ? 'Refine an existing video' : 'Upload, then refine the recording'}

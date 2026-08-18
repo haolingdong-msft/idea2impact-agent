@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type {
   ArchitectureGraph,
   ArchitectureNodeKind,
@@ -30,6 +30,185 @@ type Connector = ArchitectureGraph['connections'][number] & {
   path: string
   labelX: number
   labelY: number
+}
+
+const EDITABLE_PPT_POLL_MS = import.meta.env.MODE === 'test' ? 0 : 5_000
+
+export function EditablePptQuickTest({
+  endpoint,
+  initialImageUrl,
+}: {
+  endpoint: string
+  initialImageUrl?: string
+}) {
+  const [image, setImage] = useState<File | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [isConverting, setIsConverting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [lineage, setLineage] = useState<string | null>(null)
+  const [conversionLogs, setConversionLogs] = useState<string[]>([])
+
+  useEffect(() => () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+  }, [previewUrl])
+
+  const selectImage = (file: File | undefined) => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+    setError(null)
+    setLineage(null)
+    setConversionLogs([])
+    if (!file) {
+      setImage(null)
+      setPreviewUrl(null)
+      return
+    }
+    if (file.type !== 'image/png') {
+      setImage(null)
+      setPreviewUrl(null)
+      setError('Choose a PNG image.')
+      return
+    }
+    setImage(file)
+    setPreviewUrl(URL.createObjectURL(file))
+  }
+
+  const downloadAsPpt = async () => {
+    if ((!image && !initialImageUrl) || isConverting) return
+    setIsConverting(true)
+    setError(null)
+    setLineage(null)
+    setConversionLogs([])
+    try {
+      const sourceImage = image || await fetch(initialImageUrl!).then(response => {
+        if (!response.ok) throw new Error('The project overview test image could not be loaded.')
+        return response.blob()
+      })
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'image/png' },
+        body: sourceImage,
+      })
+      if (!response.ok) {
+        const responseText = await response.text()
+        let detail = ''
+        try {
+          detail = (JSON.parse(responseText) as { error?: string }).error || ''
+        } catch {
+          detail = responseText.trim()
+        }
+        throw new Error(detail || `Skill invocation failed (${response.status}).`)
+      }
+      const started = await response.json() as {
+        status?: string
+        statusUrl?: string
+        logs?: string[]
+      }
+      if (started.status !== 'running' || !started.statusUrl) {
+        throw new Error('Skill response did not start an observable job.')
+      }
+      setConversionLogs(started.logs || [])
+      let completed: {
+        status?: string
+        logs?: string[]
+        error?: string
+        invocationId?: string
+        sourceImageSha256?: string
+        downloadUrl?: string
+      } = started
+      while (completed.status === 'running') {
+        await new Promise(resolve => setTimeout(resolve, EDITABLE_PPT_POLL_MS))
+        const statusResponse = await fetch(started.statusUrl)
+        const statusText = await statusResponse.text()
+        try {
+          completed = JSON.parse(statusText) as typeof completed
+        } catch {
+          throw new Error(statusText.trim() || `Status check failed (${statusResponse.status}).`)
+        }
+        setConversionLogs(completed.logs || [])
+        if (!statusResponse.ok) {
+          throw new Error(completed.error || `Skill job failed (${statusResponse.status}).`)
+        }
+      }
+      if (
+        completed.status !== 'completed' ||
+        !completed.downloadUrl ||
+        !completed.invocationId ||
+        !completed.sourceImageSha256
+      ) {
+        throw new Error('Skill job completed without validated download lineage.')
+      }
+      const downloadResponse = await fetch(completed.downloadUrl)
+      if (!downloadResponse.ok) {
+        throw new Error(`PPTX download failed (${downloadResponse.status}).`)
+      }
+      const downloadUrl = URL.createObjectURL(await downloadResponse.blob())
+      const link = document.createElement('a')
+      link.href = downloadUrl
+      link.download = 'uploaded-image-editable.pptx'
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(downloadUrl)
+      setLineage(
+        `Skill ${completed.invocationId} · source SHA ` +
+        `${completed.sourceImageSha256.slice(0, 12)}…`,
+      )
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Skill invocation failed.')
+    } finally {
+      setIsConverting(false)
+    }
+  }
+
+  return (
+    <section className="editable-ppt-quick-test" aria-label="Editable PPT image test">
+      <div>
+        <span className="eyebrow">Direct skill test</span>
+        <strong>Upload the exact PNG shown in the UI</strong>
+        <p>The previewed file bytes are sent directly to image-to-editable-ppt. No DOM export is used.</p>
+      </div>
+      <label>
+        Choose PNG
+        <input
+          type="file"
+          accept="image/png"
+          onChange={event => selectImage(event.target.files?.[0])}
+        />
+      </label>
+      {(previewUrl || initialImageUrl) && (
+        <img
+          src={previewUrl || initialImageUrl}
+          alt="Exact PNG selected for editable PPT conversion"
+        />
+      )}
+      <button
+        type="button"
+        disabled={(!image && !initialImageUrl) || isConverting}
+        onClick={() => void downloadAsPpt()}
+      >
+        {isConverting ? 'Running image-to-editable-ppt skill…' : 'Download as PPT'}
+      </button>
+      {isConverting && (
+        <div
+          className="architecture-pptx-progress"
+          role="progressbar"
+          aria-label="uploaded image-to-editable-ppt skill progress"
+        >
+          <span />
+          <p>Reconstructing the uploaded image as editable PowerPoint objects…</p>
+        </div>
+      )}
+      {conversionLogs.length > 0 && (
+        <ol className="editable-ppt-logs" aria-label="Editable PPT conversion log">
+          {conversionLogs.map((entry, index) => (
+            <li key={`${index}-${entry}`}>{entry}</li>
+          ))}
+        </ol>
+      )}
+      {lineage && <p className="editable-ppt-lineage">{lineage}</p>}
+      {error && <p className="architecture-pptx-error" role="alert">{error}</p>}
+    </section>
+  )
 }
 
 export function ArchitectureCanvas({
@@ -107,7 +286,7 @@ export function ArchitectureCanvas({
     return (
       <section className="architecture-empty architecture-error">
         <span className="empty-code">ERR</span>
-        <h2>Architecture could not be generated</h2>
+        <h2>Project overview could not be generated</h2>
         <p>{error}</p>
       </section>
     )
@@ -119,7 +298,7 @@ export function ArchitectureCanvas({
         <div className="empty-grid" aria-hidden="true">
           <span /><span /><span /><span /><span /><span />
         </div>
-        <h2>Your architecture canvas is ready</h2>
+        <h2>Your overview canvas is ready</h2>
         <p>Complete the brief to turn your idea into a presentation-ready system graph.</p>
       </section>
     )
@@ -171,7 +350,7 @@ export function ArchitectureCanvas({
         <iframe
           className="architecture-html-frame"
           src={activeHtmlUrl}
-          title={`${architecture.title} architecture diagram`}
+          title={`${architecture.title} overview diagram`}
           sandbox=""
         />
       </section>
@@ -185,8 +364,6 @@ export function ArchitectureCanvas({
     (activeVisualMode === 'image' || activeVisualMode === 'narrative-image') &&
     activeImageUrl
   ) {
-    const editablePptxUrl = visual?.pptxDownloadUrl ||
-      activeImageUrl.replace(/\/architecture\/image$/, '/architecture/download.pptx')
     return (
       <section className="architecture-canvas architecture-image-canvas">
         <header className="canvas-header">
@@ -204,17 +381,8 @@ export function ArchitectureCanvas({
         {visualSwitcher}
         <img
           src={activeImageUrl}
-          alt={`${architecture.title} architecture design graph`}
+          alt={`${architecture.title} overview design graph`}
         />
-        {editablePptxUrl && (
-          <a
-            className="architecture-pptx-download"
-            href={editablePptxUrl}
-            download
-          >
-            Download editable PPTX
-          </a>
-        )}
       </section>
     )
   }
@@ -238,14 +406,14 @@ export function ArchitectureCanvas({
     <section className="architecture-canvas">
       <header className="canvas-header">
         <div>
-          <span className="eyebrow">HTML architecture</span>
+          <span className="eyebrow">HTML overview</span>
           <h2>{architecture.title}</h2>
           <p>{architecture.summary}</p>
         </div>
         <span className="live-badge"><i /> Generated</span>
       </header>
 
-      <div className="interaction-legend" aria-label="Architecture interaction legend">
+      <div className="interaction-legend" aria-label="Project overview interaction legend">
         {(['request', 'event', 'data', 'auth'] as const).map(type => (
           <span className={`legend-${type}`} key={type}><i />{type}</span>
         ))}

@@ -1,25 +1,33 @@
 const STEPS = [
-  ['01', 'Describe idea'],
-  ['02', 'Refine outline'],
-  ['03', 'Review summary'],
-  ['04', 'Approve outline'],
-  ['05', 'Generate slides'],
-  ['06', 'Generate speech'],
-  ['07', 'Upload recording'],
-  ['08', 'Refine recording'],
+  ['01', 'Start story'],
+  ['02', 'Generate overview image'],
+  ['03', 'Generate slides'],
+  ['04', 'Generate video'],
 ]
 
-export function WorkflowRail({ activeStep }: { activeStep: number }) {
+type Props = {
+  activeStep: number
+  selectedStep: number
+  onSelect: (step: number) => void
+}
+
+export function WorkflowRail({ activeStep, selectedStep, onSelect }: Props) {
   return (
     <nav className="workflow-rail" aria-label="Presentation workflow">
       <span className="rail-label">Workflow</span>
       {STEPS.map(([number, label], index) => {
         const status = index < activeStep ? 'complete' : index === activeStep ? 'active' : 'upcoming'
         return (
-          <div className={`rail-step ${status}`} key={number}>
+          <button
+            type="button"
+            className={`rail-step ${status}${index === selectedStep ? ' selected' : ''}`}
+            key={number}
+            onClick={() => onSelect(index)}
+            aria-pressed={index === selectedStep}
+          >
             <span className="rail-number">{status === 'complete' ? 'OK' : number}</span>
             <span>{label}</span>
-          </div>
+          </button>
         )
       })}
     </nav>

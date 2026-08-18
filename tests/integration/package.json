@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "test:deployed": "vitest run deployed.test.ts"
+    "test:deployed": "vitest run deployed.test.ts",
+    "test:presentation-e2e": "vitest run --config vitest.presentation-e2e.config.ts"
   },
   "devDependencies": {
     "tsx": "^4.21.0",

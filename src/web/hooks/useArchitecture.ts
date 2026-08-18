@@ -41,7 +41,7 @@ export function useArchitecture() {
     if (generateVisuals && projectId) {
       setProgress({
         status: 'running',
-        stage: 'Starting architecture generation',
+        stage: 'Starting project overview generation',
         percent: 1,
         completedTasks: 0,
         totalTasks: 1,
@@ -83,7 +83,7 @@ export function useArchitecture() {
       const responseBody = await response.text()
       if (!responseBody.trim()) {
         throw new Error(
-          `Architecture service returned an empty response (${response.status}). ` +
+          `Project overview service returned an empty response (${response.status}). ` +
           'The generation connection may have timed out.',
         )
       }
@@ -96,18 +96,18 @@ export function useArchitecture() {
         payload = JSON.parse(responseBody) as typeof payload
       } catch {
         throw new Error(
-          `Architecture service returned invalid JSON (${response.status}): ` +
+          `Project overview service returned invalid JSON (${response.status}): ` +
           responseBody.slice(0, 240),
         )
       }
       if (!response.ok || !payload.architecture) {
-        throw new Error(payload.error || `Architecture request failed (${response.status})`)
+        throw new Error(payload.error || `Project overview request failed (${response.status})`)
       }
       setArchitecture(payload.architecture)
       setVisual(payload.visual || { mode: 'legacy' })
       return payload.architecture
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : 'Architecture generation failed'
+      const message = caught instanceof Error ? caught.message : 'Project overview generation failed'
       setError(message)
       throw caught
     } finally {

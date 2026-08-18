@@ -55,7 +55,7 @@ async function localPlaywrightBrowsers(): Promise<string[]> {
   }
 }
 
-async function launchBrowser(): Promise<Browser> {
+export async function launchBrowser(): Promise<Browser> {
   const configured = process.env.PPTX_BROWSER_EXECUTABLE_PATH;
   const candidates = [
     ...(configured ? [configured] : []),
@@ -133,7 +133,7 @@ export async function exportHtmlToEditablePptx(
       const blob = await exporter.exportToPptx(slides, {
         skipDownload: true,
         title: deckTitle,
-        author: "Presentation Agent",
+        author: "Idea2Impact Agent",
         width: 13.333333,
         height: 7.5,
         includePseudoElements: true,

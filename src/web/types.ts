@@ -120,7 +120,9 @@ export interface ArchitectureVisualLayout {
 export interface ArchitectureVisual {
   mode: 'dual' | ArchitectureVisualMode | 'legacy'
   imageUrl?: string
+  visualPoints?: string[]
   pptxDownloadUrl?: string
+  pptxGenerateUrl?: string
   narrativeImageUrl?: string
   htmlUrl?: string
   validatedJsonHtmlUrl?: string
@@ -163,6 +165,7 @@ export interface Slide {
   title: string
   subtitle: string
   bullets: string[]
+  imageUrl?: string
 }
 
 export interface SlideDeck {
@@ -177,6 +180,18 @@ export interface SlideGenerationResult {
   previewUrl: string
   downloadUrl: string
   pptxDownloadUrl: string
+  pptxGenerateUrl: string
+}
+
+export interface SlideGenerationProgress {
+  status: 'idle' | 'running' | 'completed' | 'failed'
+  percent: number
+  stage: string
+  log: string
+  completedSlides: number
+  totalSlides: number
+  startedAt?: string
+  error?: string
 }
 
 export interface ProjectAsset {

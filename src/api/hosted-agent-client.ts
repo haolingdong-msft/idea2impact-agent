@@ -54,14 +54,20 @@ async function authorizationHeader(endpoint: string): Promise<string | null> {
 }
 
 export async function invokeHostedAgent(
-  operation: "chat" | "outline" | "architecture" | "architecture-html" | "architecture-image-html" | "architecture-brief" | "slides" | "speech-script",
+  operation: "chat" | "outline" | "architecture" | "architecture-html" | "architecture-image-html" | "architecture-brief" | "slides" | "speech-script" | "image-to-editable-ppt" | "images-to-editable-ppt" | "start-images-to-editable-ppt" | "editable-ppt-status",
   input: Record<string, unknown>,
   requestId = randomUUID(),
+  timeoutMs = REQUEST_TIMEOUT_MS,
+  sessionId?: string,
 ): Promise<Response> {
-  const endpoint = process.env.PRESENTATION_AGENT_INVOCATIONS_ENDPOINT?.trim();
-  if (!endpoint) {
+  const configuredEndpoint =
+    process.env.PRESENTATION_AGENT_INVOCATIONS_ENDPOINT?.trim();
+  if (!configuredEndpoint) {
     throw new Error("PRESENTATION_AGENT_INVOCATIONS_ENDPOINT is not configured.");
   }
+  const endpointUrl = new URL(configuredEndpoint);
+  if (sessionId) endpointUrl.searchParams.set("agent_session_id", sessionId);
+  const endpoint = endpointUrl.toString();
   const authorization = await authorizationHeader(endpoint);
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -79,7 +85,7 @@ export async function invokeHostedAgent(
       requestId,
       input,
     }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {
     const message = await response.text();

@@ -1,7 +1,8 @@
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Router } from "express";
+import { raw, Router, type Request, type Response } from "express";
 import { getClient } from "../client.js";
 import { enhanceModelError, getSessionOptions } from "../model-config.js";
 import {
@@ -25,6 +26,7 @@ import {
   storeProjectTextAsset,
 } from "./project-store.js";
 import {
+  invokeHostedAgent,
   invokeHostedStructured,
   isHostedAgentConfigured,
 } from "../hosted-agent-client.js";
@@ -40,6 +42,40 @@ import {
 } from "../architecture-visual.js";
 
 const router = Router();
+const EDITABLE_PPT_SKILL_TIMEOUT_MS = 15 * 60_000;
+type EditablePptSkillPayload = {
+  jobId?: unknown;
+  status?: unknown;
+  invocationId?: unknown;
+  runId?: unknown;
+  workflow?: unknown;
+  validationPassed?: unknown;
+  sourceImageSha256?: unknown;
+  sourceImageSha256s?: unknown;
+  pptxBase64?: unknown;
+  error?: unknown;
+};
+type EditablePptGatewayJob = {
+  remoteJobId: string;
+  sessionId: string;
+  sourceImageSha256: string;
+  startedAt: string;
+  logs: string[];
+  status: "running" | "completed" | "failed";
+  pptx?: Buffer;
+  invocationId?: string;
+  runId?: string;
+  error?: string;
+};
+const editablePptGatewayJobs = new Map<string, EditablePptGatewayJob>();
+const editablePptSkillInvocations = new Map<
+  string,
+  Promise<{
+    invocationId: string;
+    runId: string;
+    assetId: string;
+  }>
+>();
 
 export type ArchitectureNode = {
   id: string;
@@ -200,7 +236,7 @@ function startArchitectureProgress(projectId: string): void {
   const now = new Date().toISOString();
   architectureProgress.set(projectId, {
     status: "running",
-    stage: "Generating validated architecture JSON",
+    stage: "Generating validated overview",
     percent: 5,
     completedTasks: 0,
     totalTasks: VISUAL_TASKS.length,
@@ -222,7 +258,7 @@ async function runVisualTask<T>(
   const current = architectureProgress.get(projectId);
   if (current) {
     updateArchitectureProgress(projectId, {
-      stage: "Generating the architecture image",
+      stage: "Generating the overview image",
       tasks: current.tasks.map(item =>
         item.id === taskId ? { ...item, status: "running" } : item),
     });
@@ -235,7 +271,7 @@ async function runVisualTask<T>(
       updateArchitectureProgress(projectId, {
         completedTasks,
         percent: 20 + completedTasks * (75 / latest.totalTasks),
-        stage: "Architecture image complete",
+        stage: "Overview image complete",
         tasks: latest.tasks.map(item =>
           item.id === taskId ? { ...item, status: "completed" } : item),
       });
@@ -249,7 +285,7 @@ async function runVisualTask<T>(
       updateArchitectureProgress(projectId, {
         completedTasks,
         percent: 20 + completedTasks * (75 / latest.totalTasks),
-        stage: "Architecture image generation finished",
+        stage: "Overview image generation finished",
         tasks: latest.tasks.map(item =>
           item.id === taskId ? { ...item, status: "failed", error: message } : item),
       });
@@ -269,7 +305,7 @@ function extractJson(content: string): unknown {
   const start = trimmed.indexOf("{");
   const end = trimmed.lastIndexOf("}");
   if (start < 0 || end <= start) {
-    throw new Error("Copilot returned no architecture JSON.");
+    throw new Error("Copilot returned no project overview JSON.");
   }
   return JSON.parse(trimmed.slice(start, end + 1));
 }
@@ -298,7 +334,7 @@ function repairedArchitecture(content: string): ArchitectureGraph {
     return parseArchitecture(content);
   } catch (error) {
     throw new Error(
-      `Architecture response remained invalid after one repair: ${
+      `Project overview response remained invalid after one repair: ${
         validationMessage(error)
       }`,
     );
@@ -391,47 +427,85 @@ function architectureEvidenceBrief(input: {
     ].join("\n\n").slice(0, 36_000);
 }
 
-function architectureDesignBrief(
+export function architectureDesignBrief(
   architecture: ArchitectureGraph,
 ): string {
-  return [
-    "VALIDATED ARCHITECTURE SUMMARY",
-    JSON.stringify({
-    title: architecture.title,
-    summary: architecture.summary,
-    components: architecture.layers.flatMap(layer =>
-      layer.nodes.map(node => ({
-        id: node.id,
-        label: node.label,
-        responsibility: node.description,
-        group: layer.label,
-      }))),
-    interactions: architecture.connections.map(connection => ({
+  const platformByNodeId = new Map(
+    architecture.platforms.flatMap(platform =>
+      platform.componentNodeIds.map(nodeId => [nodeId, platform.id] as const)),
+  );
+  const toolById = new Map(
+    architecture.platforms.flatMap(platform =>
+      platform.toolings.map(tool => [tool.id, tool.label] as const)),
+  );
+  const technicalConnections = architecture.connections
+    .filter(connection =>
+      platformByNodeId.has(connection.from) &&
+      platformByNodeId.has(connection.to))
+    .sort((left, right) => Number(right.primary) - Number(left.primary))
+    .filter((connection, index, all) => {
+      const pair = [connection.from, connection.to].sort().join("::");
+      return all.findIndex(candidate =>
+        [candidate.from, candidate.to].sort().join("::") === pair
+      ) === index;
+    })
+    .slice(0, 4)
+    .map(connection => ({
       from: connection.from,
       to: connection.to,
       label: connection.label,
       mechanism: connection.mechanism,
-    })),
-    platforms: architecture.platforms,
-    workflow: architecture.workflow,
-    assumptions: architecture.assumptions,
+    }));
+
+  return [
+    "COMPACT VALIDATED PROJECT OVERVIEW JSON",
+    JSON.stringify({
+      title: architecture.title,
+      summary: architecture.summary,
+      platforms: architecture.platforms.map(platform => ({
+        id: platform.id,
+        label: platform.label,
+        tools: platform.toolings.map(tool => ({
+          id: tool.id,
+          label: tool.label,
+          componentNodeId: tool.componentNodeId,
+        })),
+      })),
+      components: architecture.layers.flatMap(layer =>
+        layer.nodes
+          .filter(node => node.kind !== "actor" && platformByNodeId.has(node.id))
+          .map(node => ({
+            id: node.id,
+            label: node.label,
+            kind: node.kind,
+            platformId: platformByNodeId.get(node.id),
+          }))),
+      technicalConnections,
+      workflow: {
+        actor: architecture.workflow.actor,
+        steps: architecture.workflow.steps.map(step => ({
+          label: step.label,
+          platforms: [...new Set(
+            step.platformCalls.map(call => call.platformId),
+          )],
+          tools: [...new Set(
+            step.platformCalls
+              .map(call => toolById.get(call.toolingId))
+              .filter((label): label is string => Boolean(label)),
+          )],
+        })),
+      },
     }),
-  ].join("\n").slice(0, 8_000);
+  ].join("\n");
 }
 
 function validatedArchitectureJsonBrief(
   architecture: ArchitectureGraph,
 ): string {
   return [
-    "VALIDATED ARCHITECTURE JSON",
-    "Use this validated graph as the sole source of components and interactions.",
-    "Render workflow.steps as a numbered vertical user-workflow lane. For each step, " +
-      "show its platformCalls beside the step as compact platform/action/mechanism/output " +
-      "details. Render platforms as large containers that visibly contain every component " +
-      "listed in componentNodeIds. Place the platform capability area beside the workflow, similar to an " +
-      "operating-model diagram. Use short adjacent links only; never draw cross-canvas routes.",
+    "COMPLETE CANONICAL VALIDATED ARCHITECTURE JSON",
     JSON.stringify(architecture),
-  ].join("\n").slice(0, 20_000);
+  ].join("\n");
 }
 
 async function generateArchitectureNarrative(input: {
@@ -473,7 +547,7 @@ async function generateArchitectureNarrative(input: {
       3_000,
     );
     if (!narrative) {
-      throw new Error("Copilot returned no architecture image narrative.");
+      throw new Error("Copilot returned no project overview image narrative.");
     }
     return narrative;
   } finally {
@@ -486,7 +560,7 @@ function sanitizeArchitectureHtml(value: string): string {
     .replace(/^```(?:html)?\s*/i, "")
     .replace(/\s*```$/, "");
   if (!/^<!doctype html>/i.test(sanitized) || sanitized.length > 120_000) {
-    throw new Error("Copilot returned invalid architecture HTML.");
+    throw new Error("Copilot returned invalid project overview HTML.");
   }
   sanitized = sanitized
     .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, "")
@@ -532,14 +606,14 @@ function validateArchitectureHtml(
 ): string {
   const html = sanitizeArchitectureHtml(value);
   if (/<svg\b/i.test(html)) {
-    throw new Error("Architecture HTML connectors must not use SVG.");
+    throw new Error("Project overview HTML connectors must not use SVG.");
   }
   if (
     /position\s*:\s*(?:absolute|fixed)/i.test(html) ||
     /margin(?:-[a-z]+)?\s*:\s*-\d/i.test(html) ||
     /transform\s*:[^;}]*(?:translate|matrix)/i.test(html)
   ) {
-    throw new Error("Architecture HTML connectors must use in-flow Grid/Flex cells.");
+    throw new Error("Project overview HTML connectors must use in-flow Grid/Flex cells.");
   }
 
   const componentIds = [...html.matchAll(
@@ -547,13 +621,13 @@ function validateArchitectureHtml(
   )].map(match => match[1].trim());
   const componentSet = new Set(componentIds);
   if (!/\bdata-architecture-flow(?:\s*=\s*["'][^"']*["'])?/i.test(html)) {
-    throw new Error("Architecture HTML requires one responsive architecture flow container.");
+    throw new Error("Project overview HTML requires one responsive flow container.");
   }
   const connectorTags = [...html.matchAll(
     /<[^>]+\bdata-connector(?:\s*=\s*["'][^"']*["'])?[^>]*>/gi,
   )].map(match => match[0]);
   if (connectorTags.length > 18) {
-    throw new Error("Architecture HTML exceeds the 18-connector visual limit.");
+    throw new Error("Project overview HTML exceeds the 18-connector visual limit.");
   }
   for (const tag of connectorTags) {
     const from = tag.match(/\bdata-from\s*=\s*["']([^"']+)["']/i)?.[1]?.trim();
@@ -565,7 +639,7 @@ function validateArchitectureHtml(
         (componentSet.size > 0 &&
           (!componentSet.has(from) || !componentSet.has(to))))
     ) {
-      throw new Error("Every architecture connector must reference two real components.");
+      throw new Error("Every project overview connector must reference two real components.");
     }
   }
 
@@ -642,7 +716,7 @@ async function generateArchitectureHtml(input: {
           return [{
             type: "file" as const,
             path: imagePath,
-            displayName: "GPT-Image-2 architecture reference.png",
+            displayName: "GPT-Image-2 project overview reference.png",
           }];
         })()
       : undefined;
@@ -750,7 +824,7 @@ function normalizeVisualArchitecture(value: unknown): unknown {
       label: text(connection.label, 100) || "connects to",
       type: CONNECTION_TYPES.has(type) ? type : "request",
       mechanism: text(connection.mechanism, 80) || "visual interaction",
-      payload: text(connection.payload, 120) || "architecture data",
+      payload: text(connection.payload, 120) || "project overview data",
       provenance: PROVENANCE.has(provenance) ? provenance : "assumed",
       primary: typeof connection.primary === "boolean"
         ? connection.primary || (!hasPrimary && index === 0)
@@ -830,13 +904,13 @@ function normalizeVisualArchitecture(value: unknown): unknown {
   const workflow = {
     actor: text(rawWorkflow.actor, 80) || "User",
     goal: text(rawWorkflow.goal, 180) || text(source.summary, 180) ||
-      "Complete the architecture workflow.",
+      "Complete the project overview workflow.",
     steps: rawSteps.length > 0 ? rawSteps : fallbackSteps,
   };
   return {
     ...source,
-    title: text(source.title, 120) || "Solution Architecture",
-    summary: text(source.summary, 300) || "Image-generated high-level architecture.",
+    title: text(source.title, 120) || "Project Overview",
+    summary: text(source.summary, 300) || "Image-generated high-level project overview.",
     layers,
     platforms,
     workflow,
@@ -847,11 +921,11 @@ function normalizeVisualArchitecture(value: unknown): unknown {
 
 export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
   if (!value || typeof value !== "object") {
-    throw new Error("Architecture response must be an object.");
+    throw new Error("Project overview response must be an object.");
   }
   const source = value as Record<string, unknown>;
   if (!Array.isArray(source.layers) || source.layers.length < 2 || source.layers.length > 4) {
-    throw new Error("Architecture must contain between 2 and 4 high-level layers.");
+    throw new Error("Project overview must contain between 2 and 4 high-level layers.");
   }
 
   const nodeIds = new Set<string>();
@@ -911,11 +985,11 @@ export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
   });
 
   if (nodeCount > 8) {
-    throw new Error("Architecture exceeds the 8-component simplicity limit.");
+    throw new Error("Project overview exceeds the 8-component simplicity limit.");
   }
   const rawPlatforms = Array.isArray(source.platforms) ? source.platforms : [];
   if (rawPlatforms.length < 1 || rawPlatforms.length > 4) {
-    throw new Error("Architecture must contain 1-4 runtime platforms.");
+    throw new Error("Project overview must contain 1-4 runtime platforms.");
   }
   const platformIds = new Set<string>();
   const toolingIds = new Set<string>();
@@ -1025,10 +1099,10 @@ export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
 
   const rawConnections = Array.isArray(source.connections) ? source.connections : [];
   if (rawConnections.length === 0) {
-    throw new Error("Architecture must contain labeled component interactions.");
+    throw new Error("Project overview must contain labeled component interactions.");
   }
   if (rawConnections.length > 10) {
-    throw new Error("Architecture exceeds the 10-connection simplicity limit.");
+    throw new Error("Project overview exceeds the 10-connection simplicity limit.");
   }
   const connections = rawConnections.map((rawConnection, index) => {
     if (!rawConnection || typeof rawConnection !== "object") {
@@ -1083,12 +1157,12 @@ export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
     );
   }
   if (!connections.some(connection => connection.primary)) {
-    throw new Error("Architecture must identify at least one primary interaction.");
+    throw new Error("Project overview must identify at least one primary interaction.");
   }
 
   const rawWorkflow = source.workflow;
   if (!rawWorkflow || typeof rawWorkflow !== "object") {
-    throw new Error("Architecture must include a user workflow.");
+    throw new Error("Project overview must include a user workflow.");
   }
   const workflowSource = rawWorkflow as Record<string, unknown>;
   const actor = text(workflowSource.actor, 80);
@@ -1169,7 +1243,7 @@ export function validateArchitectureGraph(value: unknown): ArchitectureGraph {
     : [];
 
   return {
-    title: text(source.title, 120) || "Solution Architecture",
+    title: text(source.title, 120) || "Project Overview",
     summary: text(source.summary, 300),
     layers,
     platforms,
@@ -1198,8 +1272,8 @@ router.post("/architecture", async (req, res) => {
     visualMode?: unknown;
   };
 
-  if (typeof idea !== "string" || idea.trim().length < 10) {
-    res.status(400).json({ error: "'idea' must be a string with at least 10 characters" });
+  if (typeof idea !== "string" || !idea.trim()) {
+    res.status(400).json({ error: "'idea' must be a non-empty string" });
     return;
   }
   if (idea.length > 12000) {
@@ -1223,7 +1297,7 @@ router.post("/architecture", async (req, res) => {
     (typeof visualMode !== "string" ||
       !VISUAL_MODES.has(visualMode as ArchitectureVisualMode))
   ) {
-    res.status(400).json({ error: "'visualMode' must name a supported architecture visual" });
+    res.status(400).json({ error: "'visualMode' must name a supported project overview visual" });
     return;
   }
   const project = projectId === undefined
@@ -1252,7 +1326,7 @@ router.post("/architecture", async (req, res) => {
       : null;
     if (outline?.status !== "approved") {
       res.status(409).json({
-        error: "An approved outline is required before architecture generation.",
+        error: "An approved outline is required before overview generation.",
       });
       return;
     }
@@ -1270,7 +1344,7 @@ router.post("/architecture", async (req, res) => {
     const architecture = await generateLegacyArchitecture(generationInput);
     if (project && generateVisuals !== false) {
       updateArchitectureProgress(project.id, {
-        stage: "Validated architecture JSON complete; generating image",
+        stage: "Validated overview complete; generating image",
         percent: 20,
       });
     }
@@ -1281,13 +1355,11 @@ router.post("/architecture", async (req, res) => {
     let narrativeHtmlAssetId: string | null = null;
     let imageAssetId: string | null = null;
     let narrativeImageAssetId: string | null = null;
-    if (project && generateVisuals !== false) {
-      if (!isArchitectureImageConfigured()) {
-        throw new Error(
-          "Image model design graph is not configured. Set ARCHITECTURE_MODEL_ENDPOINT " +
-          "and ARCHITECTURE_IMAGE_DEPLOYMENT.",
-        );
-      }
+    if (
+      project &&
+      generateVisuals !== false &&
+      isArchitectureImageConfigured()
+    ) {
       const imageConfiguration = architectureImageConfiguration();
       const results = await Promise.allSettled([
         runVisualTask(
@@ -1323,7 +1395,7 @@ router.post("/architecture", async (req, res) => {
         );
       }
       updateArchitectureProgress(project.id, {
-        stage: "Saving architecture image",
+        stage: "Saving overview image",
         percent: 95,
       });
       await clearCurrentProjectAssets(project.id, [
@@ -1428,6 +1500,8 @@ router.post("/architecture", async (req, res) => {
           : {}),
         pptxDownloadUrl:
           `/projects/${project.id}/architecture/download.pptx`,
+        pptxGenerateUrl:
+          `/projects/${project.id}/architecture/generate-editable-pptx`,
       };
     } else if (project) {
       await clearCurrentProjectAssets(project.id, [
@@ -1441,6 +1515,20 @@ router.post("/architecture", async (req, res) => {
         "architecture-narrative-image",
         "architecture-layout",
       ]);
+      if (generateVisuals !== false) {
+        visual = {
+          mode: "legacy",
+          fallbackReason:
+            "Image generation is not configured; showing the validated overview.",
+        };
+        updateArchitectureProgress(project.id, {
+          stage: "Validated overview is ready",
+          percent: 95,
+          completedTasks: 0,
+          totalTasks: 0,
+          tasks: [],
+        });
+      }
     }
     const stored = project
       ? await storeProjectJsonAsset(
@@ -1477,6 +1565,8 @@ router.post("/architecture", async (req, res) => {
         "slide-model",
         "slide-deck",
         "slide-deck-pptx",
+        ...Object.keys(project.currentAssets)
+          .filter(type => type.startsWith("slide-image-")) as `slide-image-${string}`[],
         "speech-script",
       ]);
     }
@@ -1487,9 +1577,11 @@ router.post("/architecture", async (req, res) => {
       ).length || 0;
       updateArchitectureProgress(project.id, {
         status: "completed",
-        stage: failedCount > 0
-          ? `${VISUAL_TASKS.length - failedCount}/${VISUAL_TASKS.length} designs ready; ${failedCount} failed`
-          : "Architecture image is ready",
+        stage: visual.mode === "legacy"
+          ? "Validated overview is ready"
+          : failedCount > 0
+            ? `${VISUAL_TASKS.length - failedCount}/${VISUAL_TASKS.length} designs ready; ${failedCount} failed`
+            : "Overview image is ready",
         percent: 100,
         ...(failedCount > 0
           ? {
@@ -1507,7 +1599,7 @@ router.post("/architecture", async (req, res) => {
     if (project && generateVisuals !== false) {
       updateArchitectureProgress(project.id, {
         status: "failed",
-        stage: "Architecture generation failed",
+        stage: "Overview generation failed",
         percent: 100,
         error: enhanced.message,
       });
@@ -1520,7 +1612,7 @@ router.get("/projects/:projectId/architecture/progress", (req, res) => {
   const progress = architectureProgress.get(req.params.projectId);
   res.json(progress || {
     status: "idle",
-    stage: "No architecture generation is running",
+    stage: "No overview generation is running",
     percent: 0,
     completedTasks: 0,
     totalTasks: VISUAL_TASKS.length,
@@ -1539,7 +1631,7 @@ router.get("/projects/:projectId/architecture/image", async (req, res) => {
     ? await readProjectBinaryAsset(req.params.projectId, assetId)
     : null;
   if (!stored) {
-    res.status(404).json({ error: "Generated architecture image not found." });
+    res.status(404).json({ error: "Generated project overview image not found." });
     return;
   }
   res.setHeader("Content-Type", "image/png");
@@ -1547,15 +1639,354 @@ router.get("/projects/:projectId/architecture/image", async (req, res) => {
   res.send(Buffer.from(stored.content));
 });
 
+function appendEditablePptLog(
+  job: EditablePptGatewayJob,
+  message: string,
+): void {
+  job.logs.push(`${new Date().toISOString()} ${message}`);
+  job.logs = job.logs.slice(-100);
+}
+
+async function startUploadedImageToPptx(req: Request, res: Response) {
+    if (!isHostedAgentConfigured()) {
+      res.status(503).json({
+        error:
+          "The image-to-editable-ppt skill runner is not deployed. " +
+          "Configure PRESENTATION_AGENT_INVOCATIONS_ENDPOINT.",
+      });
+      return;
+    }
+    const sourceImage = Buffer.isBuffer(req.body)
+      ? req.body
+      : Buffer.alloc(0);
+    if (
+      sourceImage.length < 8 ||
+      !sourceImage.subarray(0, 8).equals(
+        Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      )
+    ) {
+      res.status(400).json({ error: "Upload a valid PNG image." });
+      return;
+    }
+    const sourceImageSha256 = createHash("sha256")
+      .update(sourceImage)
+      .digest("hex");
+    try {
+      const source = {
+        sourceAssetId: `quick-test-${sourceImageSha256}`,
+        sourceImageBase64: sourceImage.toString("base64"),
+        sourceImageSha256,
+      };
+      const startResponse = await invokeHostedAgent(
+        "start-images-to-editable-ppt",
+        {
+          projectId: "editable-ppt",
+          sourceImages: [source],
+        },
+        randomUUID(),
+        60_000,
+      );
+      const started = await startResponse.json() as EditablePptSkillPayload;
+      const jobId =
+        typeof started.jobId === "string" ? started.jobId.trim() : "";
+      const sessionId =
+        startResponse.headers.get("x-agent-session-id") || "";
+      if (!jobId || started.status !== "running" || !sessionId) {
+        throw new Error("Skill runner did not start an editable PPT job.");
+      }
+      const gatewayJobId = randomUUID();
+      const job: EditablePptGatewayJob = {
+        remoteJobId: jobId,
+        sessionId,
+        sourceImageSha256,
+        startedAt: new Date().toISOString(),
+        logs: [],
+        status: "running",
+      };
+      appendEditablePptLog(job, "Upload accepted; source SHA-256 verified.");
+      appendEditablePptLog(job, `Foundry job ${jobId} started.`);
+      editablePptGatewayJobs.set(gatewayJobId, job);
+      res.status(202).json({
+        jobId: gatewayJobId,
+        status: job.status,
+        statusUrl: `/editable-pptx/${gatewayJobId}`,
+        logs: job.logs,
+      });
+    } catch (error) {
+      res.status(502).json({
+        error:
+          error instanceof Error
+            ? `image-to-editable-ppt skill invocation failed: ${error.message}`
+            : "image-to-editable-ppt skill invocation failed.",
+      });
+    }
+}
+
+router.post(
+  "/editable-pptx",
+  raw({ type: "image/png", limit: "10mb" }),
+  startUploadedImageToPptx,
+);
+
+router.get("/editable-pptx/:jobId", async (req, res) => {
+  const job = editablePptGatewayJobs.get(req.params.jobId);
+  if (!job) {
+    res.status(404).json({ error: "Editable PPT job not found." });
+    return;
+  }
+  if (job.status === "failed") {
+    res.status(502).json({ status: job.status, error: job.error, logs: job.logs });
+    return;
+  }
+  if (job.status === "completed") {
+    res.json({
+      status: job.status,
+      logs: job.logs,
+      invocationId: job.invocationId,
+      runId: job.runId,
+      sourceImageSha256: job.sourceImageSha256,
+      downloadUrl: `/editable-pptx/${req.params.jobId}/download`,
+    });
+    return;
+  }
+  appendEditablePptLog(
+    job,
+    `Checking Foundry worker (${Math.floor(
+      (Date.now() - Date.parse(job.startedAt)) / 1000,
+    )}s elapsed).`,
+  );
+  try {
+      const statusResponse = await invokeHostedAgent(
+        "editable-ppt-status",
+        { jobId: job.remoteJobId },
+        randomUUID(),
+        60_000,
+        job.sessionId,
+      );
+      const payload = await statusResponse.json() as EditablePptSkillPayload;
+      if (payload.status === "running") {
+        res.status(202).json({ status: job.status, logs: job.logs });
+        return;
+      }
+      if (payload.status !== "completed") {
+        throw new Error(
+          typeof payload.error === "string"
+            ? payload.error
+            : "Foundry worker returned an invalid status.",
+        );
+      }
+      const invocationId =
+        typeof payload.invocationId === "string"
+          ? payload.invocationId.trim()
+          : "";
+      const runId =
+        typeof payload.runId === "string" ? payload.runId.trim() : "";
+      if (
+        payload.workflow !== "image-to-editable-ppt" ||
+        payload.validationPassed !== true ||
+        JSON.stringify(payload.sourceImageSha256s) !==
+          JSON.stringify([job.sourceImageSha256]) ||
+        !invocationId ||
+        !runId ||
+        typeof payload.pptxBase64 !== "string"
+      ) {
+        throw new Error(
+          "Skill runner response is missing validated image lineage.",
+        );
+      }
+      const pptx = Buffer.from(payload.pptxBase64, "base64");
+      if (pptx.length < 4 || !pptx.subarray(0, 2).equals(Buffer.from("PK"))) {
+        throw new Error("Skill runner did not return a valid PPTX package.");
+      }
+      job.status = "completed";
+      job.pptx = pptx;
+      job.invocationId = invocationId;
+      job.runId = runId;
+      appendEditablePptLog(job, "Validation passed; editable PPTX is ready.");
+      res.json({
+        status: job.status,
+        logs: job.logs,
+        invocationId,
+        runId,
+        sourceImageSha256: job.sourceImageSha256,
+        downloadUrl: `/editable-pptx/${req.params.jobId}/download`,
+      });
+    } catch (error) {
+      job.status = "failed";
+      job.error = error instanceof Error ? error.message : String(error);
+      appendEditablePptLog(job, `FAILED: ${job.error}`);
+      res.status(502).json({ status: job.status, error: job.error, logs: job.logs });
+    }
+});
+
+router.get("/editable-pptx/:jobId/download", (req, res) => {
+  const job = editablePptGatewayJobs.get(req.params.jobId);
+  if (!job?.pptx || job.status !== "completed") {
+    res.status(409).json({ error: "Editable PPTX is not ready." });
+    return;
+  }
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  );
+  res.setHeader(
+    "Content-Disposition",
+    'attachment; filename="uploaded-image-editable.pptx"',
+  );
+  res.setHeader("X-Source-Image-Sha256", job.sourceImageSha256);
+  res.setHeader("X-Skill-Invocation-Id", job.invocationId!);
+  res.setHeader("X-Editppt-Run-Id", job.runId!);
+  res.send(job.pptx);
+});
+
+router.post(
+  "/projects/:projectId/architecture/generate-editable-pptx",
+  async (req, res) => {
+    const project = await getProject(req.params.projectId);
+    const imageAssetId = project?.currentAssets["architecture-image"];
+    const storedImage = imageAssetId
+      ? await readProjectBinaryAsset(req.params.projectId, imageAssetId)
+      : null;
+    if (!project || !storedImage) {
+      res.status(404).json({ error: "Generated overview image not found." });
+      return;
+    }
+
+    if (!isHostedAgentConfigured()) {
+      res.status(503).json({
+        error:
+          "The image-to-editable-ppt skill runner is not deployed. " +
+          "Configure PRESENTATION_AGENT_INVOCATIONS_ENDPOINT.",
+      });
+      return;
+    }
+
+    const sourceImage = Buffer.from(storedImage.content);
+    const sourceImageSha256 = createHash("sha256")
+      .update(sourceImage)
+      .digest("hex");
+    try {
+      const invocationKey = `${project.id}:${storedImage.asset.id}`;
+      let invocation = editablePptSkillInvocations.get(invocationKey);
+      if (!invocation) {
+        invocation = (async () => {
+          const skillResponse = await invokeHostedAgent(
+            "image-to-editable-ppt",
+            {
+              projectId: project.id,
+              sourceAssetId: storedImage.asset.id,
+              sourceImageMediaType: "image/png",
+              sourceImageBase64: sourceImage.toString("base64"),
+              sourceImageSha256,
+            },
+            randomUUID(),
+            EDITABLE_PPT_SKILL_TIMEOUT_MS,
+          );
+          const payload =
+            await skillResponse.json() as EditablePptSkillPayload;
+          if (!skillResponse.ok) {
+            throw new Error(
+              typeof payload.error === "string"
+                ? payload.error
+                : `Skill runner failed (${skillResponse.status}).`,
+            );
+          }
+          const invocationId =
+            typeof payload.invocationId === "string"
+              ? payload.invocationId.trim()
+              : "";
+          const runId =
+            typeof payload.runId === "string" ? payload.runId.trim() : "";
+          if (
+            payload.workflow !== "image-to-editable-ppt" ||
+            payload.validationPassed !== true ||
+            payload.sourceImageSha256 !== sourceImageSha256 ||
+            !invocationId ||
+            !runId ||
+            typeof payload.pptxBase64 !== "string"
+          ) {
+            throw new Error(
+              "Skill runner response is missing validated invocation provenance.",
+            );
+          }
+          const pptx = Buffer.from(payload.pptxBase64, "base64");
+          if (
+            pptx.length < 4 ||
+            !pptx.subarray(0, 2).equals(Buffer.from("PK"))
+          ) {
+            throw new Error("Skill runner did not return a valid PPTX package.");
+          }
+          const storedPptx = await storeProjectBinaryAsset(
+            project.id,
+            "architecture-pptx",
+            "pptx",
+            pptx,
+            [storedImage.asset.id],
+            {
+              conversionWorkflow: "image-to-editable-ppt",
+              editpptValidationPassed: true,
+              skillInvocationId: invocationId,
+              editpptRunId: runId,
+              skillInvokedAt: new Date().toISOString(),
+              sourceImageSha256,
+              fullSlideScreenshot: false,
+            },
+          );
+          return {
+            invocationId,
+            runId,
+            assetId: storedPptx.asset.id,
+          };
+        })();
+        editablePptSkillInvocations.set(invocationKey, invocation);
+        void invocation.then(
+          () => editablePptSkillInvocations.delete(invocationKey),
+          () => editablePptSkillInvocations.delete(invocationKey),
+        );
+      }
+      const result = await invocation;
+      res.status(201).json({
+        invocationId: result.invocationId,
+        runId: result.runId,
+        assetId: result.assetId,
+        downloadUrl:
+          `/projects/${project.id}/architecture/download.pptx`,
+      });
+    } catch (error) {
+      res.status(502).json({
+        error:
+          error instanceof Error
+            ? `image-to-editable-ppt skill invocation failed: ${error.message}`
+            : "image-to-editable-ppt skill invocation failed.",
+      });
+    }
+  },
+);
+
 router.get("/projects/:projectId/architecture/download.pptx", async (req, res) => {
   const project = await getProject(req.params.projectId);
-  const assetId = project?.currentAssets["architecture-pptx"];
-  const stored = assetId
-    ? await readProjectBinaryAsset(req.params.projectId, assetId)
+  const imageAssetId = project?.currentAssets["architecture-image"];
+  const pptxAssetId = project?.currentAssets["architecture-pptx"];
+  const stored = pptxAssetId
+    ? await readProjectBinaryAsset(req.params.projectId, pptxAssetId)
     : null;
-  if (!stored) {
-    res.status(404).json({
-      error: "Editable architecture PPTX has not been generated yet.",
+  const isCurrentSkillConversion = Boolean(
+    imageAssetId &&
+    stored?.asset.metadata.conversionWorkflow === "image-to-editable-ppt" &&
+    stored.asset.metadata.editpptValidationPassed === true &&
+    typeof stored.asset.metadata.skillInvocationId === "string" &&
+    Boolean(stored.asset.metadata.skillInvocationId) &&
+    typeof stored.asset.metadata.editpptRunId === "string" &&
+    Boolean(stored.asset.metadata.editpptRunId) &&
+    typeof stored.asset.metadata.skillInvokedAt === "string" &&
+    Boolean(stored.asset.metadata.skillInvokedAt) &&
+    stored.asset.sourceAssetIds.includes(imageAssetId),
+  );
+  if (!stored || !isCurrentSkillConversion) {
+    res.status(409).json({
+      error:
+        "The current Validated JSON → Image 2 overview has not completed " +
+        "the image-to-editable-ppt workflow.",
     });
     return;
   }
@@ -1565,7 +1996,7 @@ router.get("/projects/:projectId/architecture/download.pptx", async (req, res) =
   );
   res.setHeader(
     "Content-Disposition",
-    'attachment; filename="architecture-editable.pptx"',
+      'attachment; filename="presentation-overview-editable.pptx"',
   );
   res.send(Buffer.from(stored.content));
 });
@@ -1577,7 +2008,7 @@ router.get("/projects/:projectId/architecture/pptx-preview", async (req, res) =>
     ? await readProjectBinaryAsset(req.params.projectId, assetId)
     : null;
   if (!stored) {
-    res.status(404).json({ error: "Editable architecture PPTX preview not found." });
+    res.status(404).json({ error: "Editable project overview PPTX preview not found." });
     return;
   }
   res.setHeader("Content-Type", "image/png");
@@ -1592,7 +2023,7 @@ router.get("/projects/:projectId/architecture/narrative-image", async (req, res)
     ? await readProjectBinaryAsset(req.params.projectId, assetId)
     : null;
   if (!stored) {
-    res.status(404).json({ error: "Generated narrative architecture image not found." });
+    res.status(404).json({ error: "Generated narrative project overview image not found." });
     return;
   }
   res.setHeader("Content-Type", "image/png");
@@ -1605,7 +2036,7 @@ router.get("/projects/:projectId/architecture/narrative-html", async (req, res) 
   const assetId = project?.currentAssets["architecture-narrative-html"];
   const stored = assetId ? await readProjectAsset(req.params.projectId, assetId) : null;
   if (!stored) {
-    res.status(404).json({ error: "Generated narrative architecture HTML not found." });
+    res.status(404).json({ error: "Generated narrative project overview HTML not found." });
     return;
   }
   res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -1619,7 +2050,7 @@ router.get("/projects/:projectId/architecture/validated-json-html", async (req, 
   const assetId = project?.currentAssets["architecture-validated-json-html"];
   const stored = assetId ? await readProjectAsset(req.params.projectId, assetId) : null;
   if (!stored) {
-    res.status(404).json({ error: "Generated validated JSON architecture HTML not found." });
+    res.status(404).json({ error: "Generated validated JSON project overview HTML not found." });
     return;
   }
   res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -1649,7 +2080,7 @@ router.get("/projects/:projectId/architecture/html", async (req, res) => {
   const assetId = project?.currentAssets["architecture-html"];
   const stored = assetId ? await readProjectAsset(req.params.projectId, assetId) : null;
   if (!stored) {
-    res.status(404).json({ error: "Generated architecture HTML not found." });
+    res.status(404).json({ error: "Generated project overview HTML not found." });
     return;
   }
   res.setHeader("Content-Type", "text/html; charset=utf-8");

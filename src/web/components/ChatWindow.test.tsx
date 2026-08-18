@@ -6,7 +6,8 @@ import type { Message } from "../types";
 describe("ChatWindow", () => {
   it("shows empty state when no messages", () => {
     render(<ChatWindow messages={[]} isStreaming={false} />);
-    expect(screen.getByText("Architecture copilot")).toBeInTheDocument();
+    expect(screen.getByLabelText("Idea2Impact Agent")).toHaveTextContent("I2I");
+    expect(screen.getByText("Idea2Impact Copilot")).toBeInTheDocument();
   });
 
   it("renders user message", () => {

@@ -3,9 +3,14 @@ import { useState, type FormEvent } from 'react'
 interface Props {
   onSend: (message: string) => void
   disabled: boolean
+  placeholder?: string
 }
 
-export function MessageInput({ onSend, disabled }: Props) {
+export function MessageInput({
+  onSend,
+  disabled,
+  placeholder = 'Ask Copilot to refine the story or overview...',
+}: Props) {
   const [value, setValue] = useState('')
 
   const handleSubmit = (e: FormEvent) => {
@@ -21,7 +26,7 @@ export function MessageInput({ onSend, disabled }: Props) {
       <textarea
         value={value}
         onChange={e => setValue(e.target.value)}
-        placeholder="Ask Copilot to refine the story or architecture..."
+        placeholder={placeholder}
         autoFocus
         disabled={disabled}
         rows={2}

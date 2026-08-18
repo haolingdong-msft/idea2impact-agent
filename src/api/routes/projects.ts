@@ -37,29 +37,39 @@ function repositoryUrl(value: unknown): string | undefined {
   }
 }
 
-function parseBrief(value: unknown): ProjectBrief | null {
-  if (!value || typeof value !== "object") return null;
+type BriefParseResult =
+  | { brief: ProjectBrief; error?: never }
+  | { brief?: never; error: string };
+
+function parseBrief(value: unknown): BriefParseResult {
+  if (!value || typeof value !== "object") {
+    return { error: "A project requires a non-empty idea." };
+  }
   const source = value as Record<string, unknown>;
   const idea = text(source.idea, 12_000);
-  if (idea.length < 10) return null;
+  if (!idea) return { error: "A project requires a non-empty idea." };
   const rawRepositoryUrl = text(source.repositoryUrl, 500);
   const normalizedRepositoryUrl = repositoryUrl(rawRepositoryUrl);
-  if (rawRepositoryUrl && !normalizedRepositoryUrl) return null;
+  if (rawRepositoryUrl && !normalizedRepositoryUrl) {
+    return {
+      error: "Repository URL must be a valid https://github.com/owner/repository URL.",
+    };
+  }
   return {
-    title: text(source.title, 160) || "Untitled presentation",
-    idea,
-    audience: text(source.audience, 300),
-    purpose: text(source.purpose, 500),
-    repositoryUrl: normalizedRepositoryUrl,
+    brief: {
+      title: text(source.title, 160) || "Untitled presentation",
+      idea,
+      audience: text(source.audience, 300),
+      purpose: text(source.purpose, 500),
+      repositoryUrl: normalizedRepositoryUrl,
+    },
   };
 }
 
 router.post("/projects", async (req, res) => {
-  const brief = parseBrief(req.body);
-  if (!brief) {
-    res.status(400).json({
-      error: "A project requires an idea with at least 10 characters.",
-    });
+  const parsed = parseBrief(req.body);
+  if ("error" in parsed) {
+    res.status(400).json({ error: parsed.error });
     return;
   }
   const owner = projectOwnerForRequest(req);
@@ -67,7 +77,7 @@ router.post("/projects", async (req, res) => {
     res.status(401).json({ error: "Authentication is required." });
     return;
   }
-  const project = await createProject(brief, owner);
+  const project = await createProject(parsed.brief, owner);
   res.status(201).json({ project });
 });
 

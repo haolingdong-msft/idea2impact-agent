@@ -220,7 +220,7 @@ export async function installationTokenForRepository(
       headers: {
         Accept: "application/vnd.github+json",
         Authorization: authorization,
-        "User-Agent": "presentation-agent",
+        "User-Agent": "idea2impact-agent",
         "X-GitHub-Api-Version": "2022-11-28",
       },
     },
@@ -242,7 +242,7 @@ export async function installationTokenForRepository(
       headers: {
         Accept: "application/vnd.github+json",
         Authorization: authorization,
-        "User-Agent": "presentation-agent",
+        "User-Agent": "idea2impact-agent",
         "X-GitHub-Api-Version": "2022-11-28",
       },
     },
@@ -285,7 +285,7 @@ router.get("/auth/github/app/setup", (_request, response) => {
   }
   const setupNonce = randomBytes(24).toString("base64url");
   const manifest = {
-    name: process.env.GITHUB_APP_NAME || "Presentation Agent haolingdong-msft",
+    name: process.env.GITHUB_APP_NAME || "Idea2Impact Agent haolingdong-msft",
     url: process.env.GITHUB_APP_HOME_URL || "http://127.0.0.1:5173",
     redirect_url:
       process.env.GITHUB_APP_MANIFEST_CALLBACK_URL ||
@@ -312,9 +312,9 @@ router.get("/auth/github/app/setup", (_request, response) => {
   );
   response.type("html").send(`<!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"><title>Create Presentation Agent GitHub App</title></head>
+  <head><meta charset="utf-8"><title>Create Idea2Impact Agent GitHub App</title></head>
   <body>
-    <p>Redirecting to GitHub to create the least-privilege Presentation Agent App...</p>
+    <p>Redirecting to GitHub to create the least-privilege Idea2Impact Agent App...</p>
     <form id="create-app" method="post" action="https://github.com/settings/apps/new">
       <input type="hidden" name="manifest" value="${JSON.stringify(manifest)
         .replaceAll("&", "&amp;")
@@ -347,7 +347,7 @@ router.get("/auth/github/app/manifest-callback", async (request, response) => {
         method: "POST",
         headers: {
           Accept: "application/vnd.github+json",
-          "User-Agent": "presentation-agent",
+          "User-Agent": "idea2impact-agent",
           "X-GitHub-Api-Version": "2022-11-28",
         },
       },
@@ -496,7 +496,7 @@ router.get("/auth/github/callback", async (request, response) => {
     const headers = {
       Accept: "application/vnd.github+json",
       Authorization: `Bearer ${tokenBody.access_token}`,
-      "User-Agent": "presentation-agent",
+      "User-Agent": "idea2impact-agent",
       "X-GitHub-Api-Version": "2022-11-28",
     };
     const [userResponse, installationResponse] = await Promise.all([

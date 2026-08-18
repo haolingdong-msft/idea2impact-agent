@@ -21,10 +21,13 @@ vi.mock("../model-config.js", () => ({
 }));
 
 import { getClient } from "../client.js";
-import architectureRoutes, { validateArchitectureGraph } from "./architecture.js";
+import architectureRoutes, {
+  architectureDesignBrief,
+  validateArchitectureGraph,
+} from "./architecture.js";
 
 const GRAPH = {
-  title: "Presentation Agent Architecture",
+  title: "Idea2Impact Agent Architecture",
   summary: "A browser workspace uses Copilot to structure and render architecture.",
   layers: [
     {
@@ -167,10 +170,10 @@ describe("POST /architecture", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("rejects a missing or short idea", async () => {
-    const response = await request(createApp()).post("/architecture").send({ idea: "short" });
+  it("rejects a missing idea", async () => {
+    const response = await request(createApp()).post("/architecture").send({ idea: " " });
     expect(response.status).toBe(400);
-    expect(response.body.error).toContain("at least 10");
+    expect(response.body.error).toContain("non-empty");
   });
 
   it("returns a validated architecture graph", async () => {
@@ -186,7 +189,7 @@ describe("POST /architecture", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(response.body.architecture.title).toBe("Presentation Agent Architecture");
+    expect(response.body.architecture.title).toBe("Idea2Impact Agent Architecture");
     expect(response.body.architecture.layers).toHaveLength(2);
     expect(response.body.architecture.platforms[0].toolings[0]).toMatchObject({
       componentNodeId: "web-workspace",
@@ -212,6 +215,34 @@ describe("POST /architecture", () => {
       }),
       120_000,
     );
+    const prompt = session.sendAndWait.mock.calls[0][0].prompt;
+    expect(prompt).toContain("model GitHub as a platform");
+    expect(prompt).toContain("GitHub Copilot SDK as its own component");
+    expect(prompt).toContain("directional connection from");
+  });
+
+  it("creates compact validated JSON with bounded technical connections", () => {
+    const brief = architectureDesignBrief(GRAPH);
+    const specification = JSON.parse(brief.slice(brief.indexOf("\n") + 1));
+
+    expect(specification).not.toHaveProperty("layers");
+    expect(specification).not.toHaveProperty("connections");
+    expect(specification.components[0]).toMatchObject({
+      id: "web-workspace",
+      platformId: "web-platform",
+    });
+    expect(specification.technicalConnections).toHaveLength(1);
+    expect(specification.technicalConnections[0]).toEqual({
+      from: "web-workspace",
+      to: "copilot-agent",
+      label: "request architecture",
+      mechanism: "HTTPS JSON",
+    });
+    expect(specification.workflow.steps[0]).toEqual({
+      label: "Submit brief",
+      platforms: ["web-platform"],
+      tools: ["Brief capture"],
+    });
   });
 
   it("rejects invalid clarification context", async () => {

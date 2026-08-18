@@ -12,7 +12,7 @@ describe("MessageInput", () => {
 
   it("renders input and button", () => {
     render(<MessageInput onSend={onSend} disabled={false} />);
-    expect(screen.getByPlaceholderText("Ask Copilot to refine the story or architecture...")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask Copilot to refine the story or overview...")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /send/i })).toBeInTheDocument();
   });
 
@@ -20,7 +20,7 @@ describe("MessageInput", () => {
     const user = userEvent.setup();
     render(<MessageInput onSend={onSend} disabled={false} />);
 
-    const input = screen.getByPlaceholderText("Ask Copilot to refine the story or architecture...");
+    const input = screen.getByPlaceholderText("Ask Copilot to refine the story or overview...");
     await user.type(input, "  Hello world  ");
     await user.click(screen.getByRole("button", { name: /send/i }));
 
@@ -31,7 +31,7 @@ describe("MessageInput", () => {
     const user = userEvent.setup();
     render(<MessageInput onSend={onSend} disabled={false} />);
 
-    const input = screen.getByPlaceholderText("Ask Copilot to refine the story or architecture...");
+    const input = screen.getByPlaceholderText("Ask Copilot to refine the story or overview...");
     await user.type(input, "Hello");
     await user.click(screen.getByRole("button", { name: /send/i }));
 
@@ -42,7 +42,7 @@ describe("MessageInput", () => {
     const user = userEvent.setup();
     render(<MessageInput onSend={onSend} disabled={false} />);
 
-    const input = screen.getByPlaceholderText("Ask Copilot to refine the story or architecture...");
+    const input = screen.getByPlaceholderText("Ask Copilot to refine the story or overview...");
     await user.type(input, "   ");
     await user.click(screen.getByRole("button", { name: /send/i }));
 
@@ -52,7 +52,7 @@ describe("MessageInput", () => {
   it("disables input and button when disabled prop is true", () => {
     render(<MessageInput onSend={onSend} disabled={true} />);
 
-    expect(screen.getByPlaceholderText("Ask Copilot to refine the story or architecture...")).toBeDisabled();
+    expect(screen.getByPlaceholderText("Ask Copilot to refine the story or overview...")).toBeDisabled();
     expect(screen.getByRole("button", { name: /send/i })).toBeDisabled();
   });
 
@@ -60,7 +60,7 @@ describe("MessageInput", () => {
     const user = userEvent.setup();
     render(<MessageInput onSend={onSend} disabled={false} />);
 
-    const input = screen.getByPlaceholderText("Ask Copilot to refine the story or architecture...");
+    const input = screen.getByPlaceholderText("Ask Copilot to refine the story or overview...");
     await user.type(input, "Hello{enter}");
 
     expect(onSend).toHaveBeenCalledWith("Hello");

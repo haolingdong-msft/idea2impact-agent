@@ -52,3 +52,31 @@ To skip Azure BYOM tests, simply don't set the Azure environment variables (`AZU
 ## `get-github-token.mjs`
 
 Helper script to obtain a GitHub token (implementation details vary by environment).
+
+## `setup-local-auth.ps1`
+
+Restores and validates all local authentication needed by Idea2Impact Agent:
+
+- loads the selected `.azure/<environment>/.env` without printing secrets;
+- obtains `GITHUB_TOKEN` from the authenticated GitHub CLI and verifies the
+  `copilot` scope;
+- verifies Azure CLI can issue a Cognitive Services token;
+- configures Azure Speech to use the resource-specific
+  `*.cognitiveservices.azure.com` endpoint required for Entra authentication;
+- optionally configures `editppt` from `PADDLE_OCR_TOKEN`.
+
+Dot-source the script before starting services manually so its process
+environment remains in the current PowerShell session:
+
+```powershell
+. .\scripts\setup-local-auth.ps1 -EnvironmentName copilot-sdk-presentation-agent
+cd src\api
+pnpm dev
+```
+
+Use `-CheckOnly` to validate authentication without changing the azd
+environment or `editppt` configuration:
+
+```powershell
+.\scripts\setup-local-auth.ps1 -EnvironmentName copilot-sdk-presentation-agent -CheckOnly
+```

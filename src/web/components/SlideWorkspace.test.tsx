@@ -7,7 +7,7 @@ import type {
 } from '../types'
 
 const architecture: ArchitectureGraph = {
-  title: 'Presentation Agent Architecture',
+  title: 'Idea2Impact Agent Architecture',
   summary: 'A guided workflow.',
   layers: [{
     id: 'experience',
@@ -64,6 +64,8 @@ const architecture: ArchitectureGraph = {
         label: 'Approve story',
         userAction: 'Review and approve the story.',
         platformCalls: [{
+          platformId: 'web-platform',
+          toolingId: 'workspace',
           nodeId: 'workspace',
           action: 'capture approval',
           mechanism: 'React UI',
@@ -76,6 +78,8 @@ const architecture: ArchitectureGraph = {
         label: 'Generate slides',
         userAction: 'Request the final deck.',
         platformCalls: [{
+          platformId: 'copilot-platform',
+          toolingId: 'copilot',
           nodeId: 'copilot',
           action: 'generate deck',
           mechanism: 'Copilot SDK',
@@ -99,31 +103,43 @@ const architecture: ArchitectureGraph = {
 
 const result: SlideGenerationResult = {
   deck: {
-    title: 'Presentation Agent',
+    title: 'Idea2Impact Agent',
     subtitle: 'One project.',
     theme: 'azure',
     slides: [
       {
-        id: 'opening',
-        kind: 'title',
-        eyebrow: 'Presentation Agent',
-        title: 'Build the story once',
-        subtitle: 'Carry context forward.',
-        bullets: [],
+        id: 'problem',
+        kind: 'problem',
+        eyebrow: 'Problem',
+        title: 'Presentation work is fragmented',
+        subtitle: '',
+        bullets: ['Teams repeat the same approved context.'],
+        imageUrl: '/slides/problem/image',
       },
       {
-        id: 'architecture',
-        kind: 'architecture',
-        eyebrow: 'Architecture',
-        title: 'One orchestrated workspace',
+        id: 'user-scenarios',
+        kind: 'user-scenarios',
+        eyebrow: 'User scenarios',
+        title: 'One guided workflow',
         subtitle: '',
-        bullets: [],
+        bullets: ['Presenters create assets from one brief.'],
+        imageUrl: '/slides/user-scenarios/image',
+      },
+      {
+        id: 'solution',
+        kind: 'solution',
+        eyebrow: 'Solution',
+        title: 'A synchronized Idea2Impact Agent',
+        subtitle: '',
+        bullets: ['Generated assets preserve approved context.'],
+        imageUrl: '/slides/solution/image',
       },
     ],
   },
   previewUrl: '/preview',
   downloadUrl: '/download',
   pptxDownloadUrl: '/download.pptx',
+  pptxGenerateUrl: '/generate-editable-pptx',
 }
 
 describe('SlideWorkspace', () => {
@@ -144,7 +160,36 @@ describe('SlideWorkspace', () => {
     expect(onGenerate).toHaveBeenCalledOnce()
   })
 
-  it('previews generated slides and architecture as HTML', () => {
+  it('shows percentage progress and the current slide-generation action', () => {
+    render(
+      <SlideWorkspace
+        architecture={architecture}
+        visual={null}
+        result={null}
+        progress={{
+          status: 'running',
+          percent: 52,
+          stage: 'Generating visuals',
+          log: 'Finished visual 2/4: One guided workflow',
+          completedSlides: 2,
+          totalSlides: 4,
+        }}
+        isGenerating
+        error={null}
+        onGenerate={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('progressbar', {
+      name: 'Slide generation progress',
+    })).toHaveAttribute('value', '52')
+    expect(screen.getByText('52%')).toBeInTheDocument()
+    expect(screen.getByText(
+      'Finished visual 2/4: One guided workflow',
+    )).toBeInTheDocument()
+  })
+
+  it('previews full-slide images and exposes direct downloads', () => {
     const { container } = render(
       <SlideWorkspace
         architecture={architecture}
@@ -157,20 +202,44 @@ describe('SlideWorkspace', () => {
     )
 
     fireEvent.click(screen.getByRole('button', {
-      name: 'Show slide 2: One orchestrated workspace',
+      name: 'Show slide 2: One guided workflow',
     }))
-    expect(screen.getByText('Web Workspace')).toBeInTheDocument()
-    expect(screen.getByText('GitHub Copilot SDK')).toBeInTheDocument()
-    expect(screen.getByText('HTTPS JSON / approved story')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'One guided workflow illustration' }))
+      .toHaveAttribute('src', '/slides/user-scenarios/image')
+    expect(container.querySelector('.slide-preview.has-story-image')).not.toBeNull()
+    expect(container.querySelector('.slide-story-image > img')).not.toBeNull()
+    expect(container.querySelector('.slide-story-layout > ul')).toBeNull()
     expect(screen.getByRole('link', { name: 'Download HTML' })).toHaveAttribute(
       'href',
       '/download',
     )
-    expect(screen.getByRole('link', { name: 'Download editable PPTX' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Download PPTX' })).toHaveAttribute(
       'href',
       '/download.pptx',
     )
+    expect(screen.queryByText('Generate editable slides with skill'))
+      .not.toBeInTheDocument()
     expect(container.querySelector('svg')).not.toBeInTheDocument()
+  })
+
+  it('offers video creation after slides are generated', () => {
+    const onCreateVideo = vi.fn()
+    render(
+      <SlideWorkspace
+        architecture={architecture}
+        visual={null}
+        result={result}
+        isGenerating={false}
+        error={null}
+        onGenerate={vi.fn()}
+        onCreateVideo={onCreateVideo}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Generate video',
+    }))
+    expect(onCreateVideo).toHaveBeenCalledOnce()
   })
 
   it('does not show obsolete architecture design choices', () => {

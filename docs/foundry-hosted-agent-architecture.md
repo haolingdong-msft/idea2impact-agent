@@ -1,14 +1,36 @@
-# Presentation Agent on Microsoft Foundry Hosted Agents
+# Idea2Impact Agent on Microsoft Foundry Hosted Agents
 
 ## Decision
 
-The Presentation Agent can run on Microsoft Foundry Hosted Agents, but the
+The Idea2Impact Agent can run on Microsoft Foundry Hosted Agents, but the
 current web/API container cannot be registered unchanged.
 
 The GitHub Copilot SDK orchestration runs as a **custom Node 24 Hosted Agent**
 using Foundry's `invocations` protocol. The React UI, project API, HTML rendering,
 durable assets, and FFmpeg video processing remain Azure Container Apps
 responsibilities.
+
+For project overview modeling, **GitHub is a platform**, **GitHub Copilot SDK is
+a component assigned to that platform**, and the **Microsoft Foundry Hosted
+Agent is a separate component that calls the SDK**. The production request chain
+is:
+
+```text
+Microsoft Foundry platform                 GitHub platform
++-------------------------------+          +-----------------------------+
+| Hosted Agent component        |  calls   | GitHub Copilot SDK component|
+| - invocation adapter          |--------->| - CopilotClient             |
+| - presentation instructions   |          | - createSession/send        |
++-------------------------------+          +--------------+--------------+
+                                                             |
+                                                             v
+                                                Copilot model service
+```
+
+The API-to-Foundry gateway is implemented in
+`src/api/hosted-agent-client.ts`. The Hosted Agent creates `CopilotClient` in
+`src/hosted-agent/client.ts` and handles SDK sessions in
+`src/hosted-agent/index.ts`.
 
 ## Deployment topology
 
@@ -40,12 +62,19 @@ Microsoft Foundry Hosted Agent endpoint
   v
 Node 24 custom container
   - Foundry invocations adapter
-  - GitHub Copilot SDK / Copilot CLI subprocess
   - presentation instructions and structured generation
+  |\
+  | \-- managed identity --> Azure Key Vault
+  |                         - scoped GitHub token
   |
-  | GitHub token fetched with managed identity
+  | calls
   v
-Azure Key Vault
+GitHub platform
+  - GitHub Copilot SDK component
+      - CopilotClient / Copilot CLI subprocess
+      - createSession(), send(), and sendAndWait()
+  |
+  | model request
   v
 GitHub Copilot model service
 ```
@@ -56,13 +85,23 @@ GitHub Copilot model service
 |---|---|---|
 | Web UI | React, Vite, Container Apps | Workflow, approvals, previews, uploads, and downloads |
 | Presentation API | Express, TypeScript, Container Apps | Browser API, approval gates, asset lineage, rendering, media processing, and Hosted Agent gateway |
-| Hosted Agent | Node 24 custom container, Foundry Hosted Agents | Conversational orchestration and structured model generation |
+| Hosted Agent | Node 24 custom container, Microsoft Foundry | Invoke the GitHub Copilot SDK component for conversational orchestration and structured generation |
 | Invocations adapter | HTTP, invocations 2.0 | Translate versioned JSON/SSE requests into Copilot SDK sessions |
-| Copilot runtime | `@github/copilot-sdk`, Copilot CLI | Follow presentation instructions and generate grounded responses |
+| GitHub Copilot SDK | `@github/copilot-sdk`, Copilot CLI | Component on the GitHub platform that creates sessions and calls the Copilot model service |
 | Blob Storage | Azure Storage | Durable manifests and immutable presentation assets |
 | Key Vault | Azure Key Vault | Store the scoped GitHub Copilot token outside deployment configuration |
 | Managed identities | Microsoft Entra ID | API-to-Foundry, API-to-Blob, and workload-to-Key Vault authentication |
 | Observability | Application Insights and Foundry monitoring | Correlated traces, failures, latency, and deployment health |
+
+The project overview generator must preserve these identities rather than
+collapsing them into one node:
+
+| Architecture object | Required representation |
+|---|---|
+| Platform | `GitHub` |
+| Component | `GitHub Copilot SDK` |
+| Calling component | `Microsoft Foundry Hosted Agent` |
+| Directional relationship | `Hosted Agent -> GitHub Copilot SDK` |
 
 ## Invocation contract
 
@@ -80,17 +119,70 @@ The Hosted Agent exposes a versioned request envelope:
 | Operation | Input | Output |
 |---|---|---|
 | `chat` | Message, validated history, workflow context | SSE text deltas and terminal event |
-| `architecture` | Approved brief and story context | Validated architecture JSON |
-| `slides` | Approved story and architecture JSON | Validated slide model JSON |
+| `architecture` | Approved brief and story context | Architecture JSON candidate |
+| `slides` | Approved story and validated architecture JSON | Slide model JSON candidate |
 
 The Hosted Agent is stateless at this boundary. The Presentation API supplies
-approved context, validates returned structured data, and stores the result.
+approved context, validates each returned JSON candidate, and stores only a
+validated result.
 Foundry session files are not durable project storage.
 
 An OpenAPI document describes the request and response schemas. Unsupported
 versions, invalid payloads, and unsupported operations return explicit 4xx
 responses. Dependency, model, and timeout failures return correlated 5xx
 responses without secrets or raw sensitive context.
+
+## How structured JSON becomes validated JSON
+
+The JSON is generated by the model but accepted through deterministic
+application code. It is not considered valid merely because the Hosted Agent or
+Copilot SDK returned it.
+
+```text
+Approved inputs
+  -> schema-constrained Copilot prompt
+  -> Hosted Agent returns a content string
+  -> API extracts the outer JSON object
+  -> JSON.parse()
+  -> operation-specific validator
+       - normalizes bounded strings
+       - checks required fields and enum values
+       - checks collection size limits
+       - checks unique IDs and cross-references
+       - checks graph and workflow consistency
+  -> valid: persist and render
+  -> invalid: send validator feedback for one repair attempt
+       -> validate replacement JSON again
+       -> still invalid: fail the request; do not persist
+```
+
+For project overview generation, the implementation is:
+
+1. `ARCHITECTURE_GRAPH_PROMPT` in
+   `src/api/presentation-instructions.ts` specifies the exact JSON shape and
+   design constraints.
+2. `extractJson()` in `src/api/routes/architecture.ts` removes an optional
+   Markdown fence, selects the outer `{ ... }`, and calls `JSON.parse()`.
+3. `validateArchitectureGraph()` builds the accepted `ArchitectureGraph` and
+   enforces constraints including:
+   - 2-4 layers, 1-3 nodes per layer, and at most 8 nodes;
+   - unique component, platform, tooling, and workflow-step IDs;
+   - allowed node kinds, tones, connection types, and provenance values;
+   - 1-4 platforms with every non-actor component assigned exactly once;
+   - toolings that reference components on the same platform;
+   - 1-10 connections referencing real nodes, with at least one primary
+     interaction and no disconnected technical components;
+   - a 2-7 step workflow with contiguous ordering and valid
+     platform/tooling/component references.
+4. If validation fails, the API sends the bounded validation error and previous
+   response back through either the Hosted Agent or the local Copilot SDK.
+   `ARCHITECTURE_GRAPH_REPAIR_PROMPT` requests one complete replacement object.
+5. The replacement passes through the same parser and validator. A second
+   failure is surfaced as an error rather than stored as success-shaped data.
+
+Equivalent validators handle outlines, slide decks, speech scripts, and
+architecture HTML. The key trust boundary remains the same: model output is
+untrusted until the Presentation API validator returns the typed value.
 
 ## Primary flows
 
@@ -108,8 +200,9 @@ responses without secrets or raw sensitive context.
 
 1. The API verifies all required approvals in the project manifest.
 2. The API submits approved context to the Hosted Agent.
-3. The Hosted Agent returns structured JSON.
-4. The API validates the JSON again at the trust boundary.
+3. The Hosted Agent returns a structured JSON candidate.
+4. The API parses and validates the candidate at the trust boundary, allowing
+   one bounded repair attempt if validation fails.
 5. The API stores a new Blob asset revision and renders escaped semantic HTML.
 6. Architecture changes invalidate stale slide pointers without deleting source
    assets.
