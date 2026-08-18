@@ -5,5 +5,7 @@ tests/integration/artifacts/
 .azure/
 .env
 *.log
+__pycache__/
+*.py[cod]
 infra/main.json
 .azure
